@@ -1,0 +1,18 @@
+# 密钥：绝不入库
+.env
+
+# 运行时产物
+app.db
+logs/
+data/uploads/
+
+# 爬虫抓的原始文件（可由 crawl_corpus.py 重新生成）
+data/corpus_raw/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 / 注册</title>
+</head>
+<body>
+  <!-- M1：登录/注册。成功后按 /api/state 的 view 决定去 onboarding 还是主界面 -->
+  <h1>登录 / 注册</h1>
+
+  <p>
+    <label>用户名 <input id="username" autocomplete="username"></label>
+  </p>
+  <p>
+    <label>密码 <input id="password" type="password" autocomplete="current-password"></label>
+  </p>
+  <p>
+    <button onclick="submitAuth('/api/login')">登录</button>
+    <button onclick="submitAuth('/api/register')">注册并进入</button>
+  </p>
+  <p id="msg" style="color: #c00;"></p>
+  <p><a href="index.html">← 返回介绍页</a></p>
+
+  <script>
+    async function submitAuth(url) {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const msg = document.getElementById('msg');
+      msg.textContent = '';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) { msg.textContent = data.error || '出错了，再试一次'; return; }
+      localStorage.setItem('token', data.token);
+      // 拿到 token 后问后端该去哪个视图（文档 7.1）
+      const state = await (await fetch('/api/state', {
+        headers: { 'Authorization': 'Bearer ' + data.token },
+      })).json();
+      location.href = state.view === 'onboarding' ? 'onboarding.html' : 'app.html';
+    }
+  </script>
+</body>
+</html>

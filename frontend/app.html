@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>主界面</title>
+  <style>
+    /* 只保证结构清晰、按钮能点，精致 UI 由队友负责 */
+    body { max-width: 640px; margin: 0 auto; padding: 16px; }
+    #offwork-btn { font-size: 22px; padding: 18px 48px; }
+    .card { border: 1px solid #ccc; border-radius: 10px; padding: 16px; margin: 12px 0; }
+    .small-btns button { margin: 4px 6px 4px 0; }
+    #clock-bar {
+      position: fixed; right: 12px; bottom: 12px;
+      background: rgba(0, 0, 0, 0.6); color: #fff;
+      padding: 8px 12px; border-radius: 8px; font-size: 13px;
+    }
+    #clock-bar button { margin-left: 6px; }
+    #loading { color: #666; }
+    #toast {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      background: #2a7; color: #fff; padding: 8px 18px; border-radius: 8px;
+      font-size: 14px; display: none; z-index: 10; max-width: 90%;
+    }
+    #toast.err { background: #c33; }
+  </style>
+</head>
+<body>
+  <!-- 操作结果提示：所有修改/保存/确认成功后都在这里明确告知 -->
+  <div id="toast"></div>
+
+  <h1>今晚</h1>
+
+  <!-- home 视图：大按钮「下班了」（文档 3.2） -->
+  <div id="home-view" style="display:none;">
+    <p><button id="offwork-btn" onclick="offwork()">下班了</button></p>
+  </div>
+
+  <!-- 回执视图：第二天点「下班了」先收昨晚回执（文档 7.2） -->
+  <div id="feedback-view" style="display:none;" class="card">
+    <h2 id="fb-question"></h2>
+    <div class="small-btns">
+      <button onclick="sendFeedback('完成了')">完成了</button>
+      <button onclick="sendFeedback('只完成一部分')">只完成一部分</button>
+      <button onclick="sendFeedback('完全没完成')">完全没完成</button>
+      <button onclick="sendFeedback('建议仍然太难')">建议仍然太难</button>
+      <button onclick="sendFeedback('跳过')">跳过</button>
+    </div>
+  </div>
+
+  <!-- advice 视图：建议卡片 + 接受 + 一击纠正（文档 3.2 / 7.2） -->
+  <div id="advice-view" style="display:none;">
+    <!-- 昨晚回执可改（点错了后悔的回退入口） -->
+    <p id="yesterday-line" style="display:none; font-size:13px; color:#666;">
+      昨晚记为：<span id="yesterday-fb"></span>
+      <a href="javascript:void(0)" onclick="reopenFeedback()">点错了？改</a>
+    </p>
+    <div class="card">
+      <h2>今晚的最低线</h2>
+      <p><strong id="adv-judgement"></strong></p>
+      <p id="adv-reason" style="color:#666;"></p>
+      <ul>
+        <li id="adv-eat"></li>
+        <li id="adv-move"></li>
+        <li id="adv-stop"></li>
+      </ul>
+      <p id="adv-sources" style="font-size:12px; color:#999;"></p>
+      <p><button onclick="accept()">就这样</button> <span id="accept-msg" style="color:#2a7;"></span></p>
+    </div>
+    <!-- Agent 过程可视化（文档 9.4，演示加分项）：折叠面板展示工具调用轨迹 -->
+    <details id="trace-panel" style="font-size:13px; color:#666; margin:8px 0;">
+      <summary>它是怎么得出这个建议的</summary>
+      <ol id="trace-steps"></ol>
+      <p id="trace-meta" style="font-size:12px; color:#999;"></p>
+    </details>
+    <div class="small-btns">
+      不对？一击纠正：
+      <button onclick="correct('今晚更累')">今晚更累</button>
+      <button onclick="correct('时间更少')">时间更少</button>
+      <button onclick="correct('不太舒服')">不太舒服</button>
+      <button onclick="correct('今天还行')">今天还行</button>
+      <button onclick="correct('其实我做了')">其实我做了</button>
+    </div>
+  </div>
+
+  <!-- 补充一句 / 拍一下（文档 3.2 / 7.3；不做成首屏主角） -->
+  <div id="input-bar" style="display:none; margin-top:16px;">
+    <input id="free-text" placeholder="补充一句：加班了 / 中午吃了什么…" size="36">
+    <button onclick="sendFreeInput()">发送</button>
+    <label style="margin-left:8px; cursor:pointer; text-decoration:underline;">
+      拍一下<input id="meal-photo" type="file" accept="image/*" style="display:none;" onchange="uploadMealPhoto()">
+    </label>
+    <div id="input-msg" style="color:#2a7;"></div>
+  </div>
+
+  <p id="loading" style="display:none;">正在想今晚怎么安排，大约十几秒…</p>
+  <p style="margin-top:24px;">
+    <a href="onboarding.html?edit=1">我的资料</a> ·
+    <a href="index.html" onclick="localStorage.removeItem('token')">退出登录</a>
+  </p>
+
+  <!-- 演示控制条（文档第八节） -->
+  <div id="clock-bar">
+    <span id="clock-display">加载中…</span>
+    <button onclick="changeClock({advance_hours: 1})">+1小时</button>
+    <button onclick="changeClock({advance_days: 1})">下一天</button>
+    <button onclick="changeClock({reset: true})">重置</button>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) location.href = 'auth.html';
+    const AUTH = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+
+    function show(viewId) {
+      for (const id of ['home-view', 'feedback-view', 'advice-view']) {
+        document.getElementById(id).style.display = id === viewId ? 'block' : 'none';
+      }
+      // 自由输入框在 home / advice 视图都可用，回执时收起
+      document.getElementById('input-bar').style.display =
+        viewId === 'feedback-view' ? 'none' : 'block';
+    }
+
+    function setLoading(on) {
+      document.getElementById('loading').style.display = on ? 'block' : 'none';
+    }
+
+    // 所有修改/保存/确认成功后都用它明确告知用户
+    let toastTimer = null;
+    function toast(msg, isErr) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = isErr ? 'err' : '';
+      el.style.display = 'block';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.style.display = 'none', 4000);
+    }
+
+    // 昨晚回执状态行：显示已选项 + 「点错了？改」
+    let yesterdayFb = null;   // {record_id, feedback, advice}
+    function renderYesterdayLine(yf) {
+      yesterdayFb = yf;
+      const line = document.getElementById('yesterday-line');
+      if (!yf) { line.style.display = 'none'; return; }
+      document.getElementById('yesterday-fb').textContent = yf.feedback;
+      line.style.display = 'block';
+    }
+
+    // 「点错了？改」：重新打开回执四档屏
+    function reopenFeedback() {
+      if (!yesterdayFb) return;
+      const a = yesterdayFb.advice || {};
+      document.getElementById('fb-question').textContent =
+        `昨晚「${a.move || a.stop || a.judgement || '的建议'}」做得怎么样？`;
+      document.getElementById('feedback-view').dataset.recordId = yesterdayFb.record_id;
+      show('feedback-view');
+    }
+
+    async function api(path, body) {
+      const res = await fetch(path, { method: 'POST', headers: AUTH, body: JSON.stringify(body || {}) });
+      if (res.status === 401) { localStorage.removeItem('token'); location.href = 'auth.html'; return null; }
+      return res.json();
+    }
+
+    // 开屏先问后端该显示什么（文档 7.1）
+    async function refreshState() {
+      const res = await fetch('/api/state', { headers: AUTH });
+      if (res.status === 401) { localStorage.removeItem('token'); location.href = 'auth.html'; return; }
+      const state = await res.json();
+      if (state.view === 'onboarding') { location.href = 'onboarding.html'; return; }
+      document.getElementById('clock-display').textContent = state.virtual_now_display;
+      renderYesterdayLine(state.yesterday_feedback);
+      if (state.view === 'advice') { renderAdvice(state.today_advice); show('advice-view'); }
+      else show('home-view');
+    }
+
+    // 「下班了」：可能先要收昨晚回执（文档 7.2）
+    async function offwork() {
+      setLoading(true);
+      const data = await api('/api/offwork');
+      setLoading(false);
+      if (!data) return;
+      if (data.need_feedback) {
+        const a = data.record.advice || {};
+        document.getElementById('fb-question').textContent =
+          `昨晚「${a.move || a.stop || a.judgement || '的建议'}」做得怎么样？`;
+        document.getElementById('feedback-view').dataset.recordId = data.record.record_id;
+        show('feedback-view');
+        return;
+      }
+      renderAdvice(data.advice); show('advice-view');
+    }
+
+    // 回执四档/跳过 → 写库；首次紧接着生成今晚建议，改回执时可能按新档位重出建议
+    async function sendFeedback(fb) {
+      const recordId = Number(document.getElementById('feedback-view').dataset.recordId);
+      setLoading(true);
+      const data = await api('/api/feedback', { record_id: recordId, feedback: fb });
+      setLoading(false);
+      if (!data || data.error) { toast((data && data.error) || '提交失败，请重试', true); return; }
+      if (yesterdayFb && yesterdayFb.record_id === recordId) yesterdayFb.feedback = fb;
+      renderYesterdayLine(yesterdayFb || { record_id: recordId, feedback: fb, advice: null });
+      if (data.advice) {
+        // 改回执导致档位变化，今晚建议已按新档位重新生成
+        renderAdvice(data.advice); show('advice-view');
+        toast(`已改为「${fb}」，今晚建议已按新档位重新生成 ✓`);
+      } else if (currentAdvice) {
+        // 改回执但档位没变：回到建议卡片
+        show('advice-view');
+        toast(`已记下：${fb} ✓`);
+      } else {
+        // 首次回执：紧接着生成今晚建议
+        toast(`已记下：${fb} ✓`);
+        await offwork();
+      }
+    }
+
+    // 一击纠正 → 重跑建议
+    async function correct(type) {
+      setLoading(true);
+      const data = await api('/api/correct', { type });
+      setLoading(false);
+      if (data && data.advice) {
+        renderAdvice(data.advice); show('advice-view');
+        toast(`已按「${type}」重新生成 ✓`);
+      } else {
+        toast((data && data.error) || '重新生成失败，请重试', true);
+      }
+    }
+
+    // 自由输入 → 当天已有建议就重出，否则轻确认
+    async function sendFreeInput() {
+      const input = document.getElementById('free-text');
+      const text = input.value.trim();
+      if (!text) return;
+      setLoading(true);
+      const data = await api('/api/free_input', { text });
+      setLoading(false);
+      if (!data) return;
+      if (data.error) { toast(data.error, true); return; }
+      input.value = '';
+      if (data.advice) {
+        renderAdvice(data.advice); show('advice-view');
+        toast('已把这句话考虑进去，建议已更新 ✓');
+      } else {
+        toast(data.message || '已记下 ✓');
+      }
+    }
+
+    // 食物照片：识别 → 存为当日饮食记录 → 轻确认 + 可删除回退（文档 7.3）
+    async function uploadMealPhoto() {
+      const input = document.getElementById('meal-photo');
+      if (!input.files.length) return;
+      const form = new FormData();
+      form.append('file', input.files[0]);
+      const msg = document.getElementById('input-msg');
+      msg.textContent = '认一下这是什么…';
+      const res = await fetch('/api/meal/photo', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token },   // FormData 不手动设 Content-Type
+        body: form,
+      });
+      const data = await res.json();
+      input.value = '';
+      if (!res.ok || !data.ok) {
+        msg.textContent = '';
+        toast(data.error || '没认出来，晚点再试', true);
+        return;
+      }
+      // 轻确认 + 「记错了？删除」（识别错/传错图的回退）
+      msg.textContent = '';
+      const confirmSpan = document.createElement('span');
+      confirmSpan.textContent = data.message + ' ';
+      const delBtn = document.createElement('a');
+      delBtn.href = 'javascript:void(0)';
+      delBtn.textContent = '记错了？删除';
+      delBtn.onclick = async () => {
+        const d = await api('/api/meal/delete', { meal_id: data.meal_id });
+        msg.textContent = '';
+        if (d && d.ok) toast(d.message + ' ✓');
+        else toast((d && d.error) || '删除失败', true);
+      };
+      msg.replaceChildren(confirmSpan, delBtn);
+      setTimeout(() => { if (msg.contains(confirmSpan)) msg.textContent = ''; }, 15000);
+    }
+
+    // 接受：界面停在建议卡片，反馈动作发生在下一次触点（文档 7.2）
+    function accept() {
+      document.getElementById('accept-msg').textContent = '好，今晚就这样。有变化随时回来改。';
+    }
+
+    // 拉最近一次 Agent 轨迹填进折叠面板（文档 9.4）
+    async function loadTrace() {
+      const res = await fetch('/api/agent_trace', { headers: AUTH });
+      if (!res.ok) return;
+      const data = await res.json();
+      const ol = document.getElementById('trace-steps');
+      ol.innerHTML = '';
+      if (!data.trace) return;
+      for (const s of data.trace.steps) {
+        const li = document.createElement('li');
+        li.textContent = s;
+        ol.appendChild(li);
+      }
+      document.getElementById('trace-meta').textContent =
+        `本次思考用时 ${data.trace.duration_s ?? '?'} 秒 · ${data.trace.virtual_time ?? ''}`;
+    }
+
+    // 按行渲染建议卡片：null 的行不显示；safety_flag 时只显示休息/就医提示（文档 5.2）
+    let currentAdvice = null;
+    function renderAdvice(a) {
+      currentAdvice = a;
+      loadTrace();   // 每次建议更新都同步刷新轨迹面板
+      document.getElementById('accept-msg').textContent = '';
+      const set = (id, text) => {
+        const el = document.getElementById(id);
+        el.style.display = text ? '' : 'none';
+        el.textContent = text || '';
+      };
+      if (a.safety_flag) {
+        set('adv-judgement', a.judgement);
+        set('adv-reason', a.reason);
+        set('adv-eat', null); set('adv-move', null);
+        set('adv-stop', a.stop || '今晚好好休息，不舒服请及时就医');
+        set('adv-sources', null);
+        return;
+      }
+      set('adv-judgement', a.judgement);
+      set('adv-reason', a.reason);
+      set('adv-eat', a.eat ? '吃：' + a.eat : null);
+      set('adv-move', a.move ? '动：' + a.move : null);
+      set('adv-stop', a.stop ? '停：' + a.stop : null);
+      set('adv-sources', a.sources && a.sources.length ? '参考依据：' + a.sources.join('、') : null);
+    }
+
+    // 时间变化后重新拉 /api/state，界面随之切换（文档第八节）
+    async function changeClock(payload) {
+      await fetch('/api/clock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      await refreshState();
+    }
+
+    refreshState();
+  </script>
+</body>
+</html>
