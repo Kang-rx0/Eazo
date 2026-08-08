@@ -2,13 +2,79 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>最低自我照顾 · 介绍</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>值夜 · 欢迎</title>
+  <link rel="stylesheet" href="nightwatch.css">
 </head>
 <body>
-  <!-- M0 空页面：只保证结构清晰、能互相跳转，样式由队友后续替换 -->
-  <h1>最低自我照顾 Agent</h1>
-  <p>给下班后精力所剩无几的你，一份足够小的今晚建议。</p>
-  <p><a href="auth.html">登录 / 注册</a></p>
+  <!-- V3 P2：welcome tour 三张海报（差异清单 ①-6），文案照队友原型逐字。
+       已登录（localStorage 有 token 且 /api/state 通）直接跳 app.html。 -->
+  <header class="topbar">
+    <div class="badge">
+      <div class="face" data-mood="happy" aria-hidden="true"><i class="l"></i><i class="r"></i><u></u></div>
+      <div>
+        <b>值夜</b>
+        <s>今晚值班</s>
+      </div>
+    </div>
+  </header>
+
+  <main class="screens">
+    <section class="screen" id="s-welcome" data-active>
+      <div class="body">
+        <div class="poster-track" id="welcomeTrack">
+          <div class="poster">
+            <p class="tag">01</p>
+            <h1>下班了<br>只剩一点力气</h1>
+            <p class="sub">只剩这么点时间和力气，也还是想对自己好一点。</p>
+          </div>
+          <div class="poster">
+            <p class="tag">02</p>
+            <h1>不是长期计划<br>是今晚这一件</h1>
+            <p class="sub">按你平时的情况和今天的状态，在剩下这点时间里给一版最合适、最省力的安排——吃什么、动多久、几点停，随时能改。</p>
+          </div>
+          <div class="poster">
+            <p class="tag">03</p>
+            <h1>今天能做多少<br>就是最好的自己</h1>
+            <p class="sub">不跟明天比，也不设固定标准——今晚能给多少，就给到位，这就够。先认识你一下，以后每天这件事我先想好。</p>
+          </div>
+        </div>
+        <div class="dots" id="welcomeDots" role="tablist" aria-label="引导卡进度">
+          <button class="dot" type="button" role="tab" aria-selected="true" aria-label="第 1 张"></button>
+          <button class="dot" type="button" role="tab" aria-selected="false" aria-label="第 2 张"></button>
+          <button class="dot" type="button" role="tab" aria-selected="false" aria-label="第 3 张"></button>
+        </div>
+      </div>
+      <div class="foot">
+        <!-- CTA 从第 1 张起常驻，不设单独「跳过」（DESIGN.md Welcome Tour 硬规则） -->
+        <button class="btn primary" type="button" onclick="location.href='auth.html'">开始认识你</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // 已登录且 token 有效 → 不看海报，直接进对应视图（P2 规格）
+    (async () => {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      try {
+        const res = await fetch('/api/state', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!res.ok) return;                      // 401 等：留在欢迎页
+        const state = await res.json();
+        location.replace(state.view === 'onboarding' ? 'onboarding.html' : 'app.html');
+      } catch (e) { /* 后端没起来时留在欢迎页即可 */ }
+    })();
+
+    // 分页点：滚动同步 + 点击跳转（welcome tour 允许点击跳转，滑动仍是主入口）
+    const track = document.getElementById('welcomeTrack');
+    const dots = [...document.querySelectorAll('#welcomeDots .dot')];
+    track.addEventListener('scroll', () => {
+      const i = Math.round(track.scrollLeft / track.clientWidth);
+      dots.forEach((d, j) => d.setAttribute('aria-selected', String(j === i)));
+    }, { passive: true });
+    dots.forEach((d, i) => d.addEventListener('click', () => {
+      track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' });
+    }));
+  </script>
 </body>
 </html>
