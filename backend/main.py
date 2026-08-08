@@ -135,6 +135,51 @@ CORRECT_TYPES = ("今晚更累", "时间更少", "不太舒服", "今天还行",
 # 「下班了」时的状态自述选项（生成前先问一句，语义与一击纠正一致）
 OFFWORK_STATES = ("今晚更累", "时间更少", "不太舒服", "今天还行")
 
+# V3 B2：s-confirm 校准里算"精力低"的两档
+_CALIB_ENERGY_LOW = ("几乎没有", "很低")
+
+
+def _map_calibration(calib: dict, remaining_min: int) -> tuple[str | None, dict | None]:
+    """V3 B2：把 s-confirm 的结构化校准映射为既有机制（不新造安全通道），纯函数。
+    映射表（整合实施计划 B2）：
+      body=有明显不适 → 下班状态"不太舒服"（既有路径：进安全扫描 + 上下文注入）；
+      energy∈{几乎没有,很低} → 下班状态"今晚更累"（body 已占用时降级为补充条件行）；
+      time_budget_min 比后端估算的剩余时间更紧 → conditions 记"剩余分钟"（宁紧不松，放宽不理）；
+      energy=还行 且无其他 → 下班状态"今天还行"；全默认 → (None, None)，与 {} 完全一致。
+    返回 (offwork_state, 待并入 conditions 的字典)。"""
+    body = calib.get("body")
+    energy = calib.get("energy")
+    tb = calib.get("time_budget_min")
+    state = None
+    store: dict = {}
+    if body == "有明显不适":
+        state = "不太舒服"
+        if energy in _CALIB_ENERGY_LOW:
+            store["校准补充行"] = f"用户还提到今晚精力{energy}"
+    elif energy in _CALIB_ENERGY_LOW:
+        state = "今晚更累"
+    if isinstance(tb, (int, float)) and not isinstance(tb, bool) and 0 <= tb < remaining_min:
+        store["剩余分钟"] = int(tb)
+    if state is None and energy == "还行" and not store:
+        state = "今天还行"
+    if state is None and not store:
+        return None, None
+    # 原始校准原样入 conditions（只留契约三键，防前端塞杂物）
+    store["校准"] = {k: calib.get(k) for k in ("time_budget_min", "energy", "body")}
+    return state, store
+
+
+def _resolve_offwork_payload(payload: dict | None, remaining_min: int) -> tuple[str | None, dict | None]:
+    """解析 offwork 入参（V3 B2），纯函数：state 合法则优先（与 calibration 同传时防歧义）；
+    否则映射 calibration；两者都没有 → (None, None)，与 {} 完全一致。"""
+    payload = payload or {}
+    state = payload.get("state")
+    state = state if state in OFFWORK_STATES else None
+    calib = payload.get("calibration")
+    if state is not None or not isinstance(calib, dict) or not calib:
+        return state, None
+    return _map_calibration(calib, remaining_min)
+
 # 每用户一把锁：防止双击「下班了」并发生成两条当日记录（B9）
 _offwork_locks: dict[int, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -167,15 +212,20 @@ def _compute_today_baseline(user_id: int) -> int:
 
 def _run_and_save_today(user_id: int, username: str, record=None,
                         extra_conditions: list[str] | None = None,
-                        offwork_state: str | None = None) -> dict:
+                        offwork_state: str | None = None,
+                        calibration_conditions: dict | None = None) -> dict:
     """跑 Agent 并写库。record 为 None 时新建当日记录，否则更新（纠正/自由输入重跑）。
     offwork_state：「下班了」时的状态自述（今晚更累/时间更少/不太舒服/今天还行），
-    存进 conditions 后当天所有重生成都会带着它（上下文注入 + 安全扫描）。"""
+    存进 conditions 后当天所有重生成都会带着它（上下文注入 + 安全扫描）。
+    calibration_conditions（V3 B2）：_map_calibration 的产物（"校准"原样 +
+    派生的"剩余分钟"/"校准补充行"），同样存 conditions、重生成继续带着。"""
     if record is None:
         level = _compute_today_baseline(user_id)
         conditions = {"来源": "offwork", "档位": level, "纠正": []}
         if offwork_state:
             conditions["下班状态"] = offwork_state
+        if calibration_conditions:
+            conditions.update(calibration_conditions)
     else:
         level = record["baseline_level"] if record["baseline_level"] is not None else 3
         conditions = json.loads(record["conditions_json"] or "{}")
@@ -183,6 +233,15 @@ def _run_and_save_today(user_id: int, username: str, record=None,
                   if conditions.get("下班状态") else None)
     if state_line:
         extra_conditions = [state_line] + (extra_conditions or [])
+    # V3 B2：校准派生注入行——与下班状态行同构（存 conditions、每次重生成都带），
+    # 但不进安全扫描 texts（与"难度再高一点不进扫描"同一设计：非健康自述不扫）
+    calib_lines = []
+    if conditions.get("剩余分钟"):
+        calib_lines.append(f"用户说今晚只剩约 {conditions['剩余分钟']} 分钟，几点停按它收紧")
+    if conditions.get("校准补充行"):
+        calib_lines.append(conditions["校准补充行"])
+    if calib_lines:
+        extra_conditions = (extra_conditions or []) + calib_lines
 
     # 输入侧安全检测（V2 三层架构入口）：当天全部自由输入 + 纠正项 + 档案（健康备注/结构化病况）。
     # 当天说过的危险信号对当晚整晚有效——之后不管因为什么重新生成建议，都带着这个等级。
@@ -277,10 +336,19 @@ async def api_offwork(request: Request, payload: dict | None = None):
                 },
             }
 
-        state = (payload or {}).get("state")
-        state = state if state in OFFWORK_STATES else None
-        logger.info("user=%s event=offwork 触发建议生成 状态自述=%s", username, state)
-        advice = _run_and_save_today(user_id, username, offwork_state=state)
+        # V3 B2：解析 state / calibration（state 优先）。remaining_min 只在带校准时才需要估算
+        remaining_min = 0
+        if isinstance((payload or {}).get("calibration"), dict):
+            last = db.get_last_records_before(user_id, today, limit=1)
+            last_fb = last[0]["feedback"] if last else None
+            hint = agent.build_confirm_hint(profile, clock.now(), last_fb,
+                                            _compute_today_baseline(user_id))
+            remaining_min = hint["remaining_min"]
+        state, calib_conditions = _resolve_offwork_payload(payload, remaining_min)
+        logger.info("user=%s event=offwork 触发建议生成 状态自述=%s 校准=%s",
+                    username, state, calib_conditions)
+        advice = _run_and_save_today(user_id, username, offwork_state=state,
+                                     calibration_conditions=calib_conditions)
         return {"advice": advice}
 
 

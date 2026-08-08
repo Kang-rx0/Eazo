@@ -622,6 +622,68 @@ class TestS4ChronicTwoTier(unittest.TestCase):
             self.assertNotIn("热线", text)   # 用户确认：不提供任何求助热线
 
 
+class TestOffworkCalibrationB2(unittest.TestCase):
+    """V3 B2：/api/offwork calibration 的映射（backend.main 纯函数，不起服务、不碰库）。"""
+
+    def setUp(self):
+        from backend.main import _map_calibration, _resolve_offwork_payload
+        self.map_c = _map_calibration
+        self.resolve = _resolve_offwork_payload
+
+    def test_映射_身体不适(self):
+        state, store = self.map_c({"body": "有明显不适"}, 90)
+        self.assertEqual(state, "不太舒服")
+        self.assertEqual(store["校准"]["body"], "有明显不适")
+        self.assertNotIn("剩余分钟", store)
+
+    def test_映射_精力低两档(self):
+        for e in ("几乎没有", "很低"):
+            state, store = self.map_c({"energy": e, "body": "没有明显不适"}, 90)
+            self.assertEqual(state, "今晚更累", e)
+
+    def test_映射_时间预算只紧不松(self):
+        # 比估算紧 → 记剩余分钟；比估算松 → 不记（且无其他输入时与 {} 完全一致）
+        state, store = self.map_c({"time_budget_min": 45}, 90)
+        self.assertIsNone(state)
+        self.assertEqual(store["剩余分钟"], 45)
+        self.assertEqual(self.map_c({"time_budget_min": 120}, 90), (None, None))
+
+    def test_映射_还行且无其他(self):
+        state, store = self.map_c({"energy": "还行", "body": "没有明显不适",
+                                   "time_budget_min": None}, 90)
+        self.assertEqual(state, "今天还行")
+        # 还行 + 时间收紧 → 不写下班状态，只记剩余分钟
+        state2, store2 = self.map_c({"energy": "还行", "time_budget_min": 30}, 90)
+        self.assertIsNone(state2)
+        self.assertEqual(store2["剩余分钟"], 30)
+
+    def test_映射_全默认与空等价(self):
+        self.assertEqual(self.map_c({"time_budget_min": None, "energy": None,
+                                     "body": "暂未确认"}, 90), (None, None))
+        self.assertEqual(self.resolve({}, 90), (None, None))
+        self.assertEqual(self.resolve(None, 90), (None, None))
+
+    def test_映射_body优先于energy(self):
+        state, store = self.map_c({"body": "有明显不适", "energy": "几乎没有"}, 90)
+        self.assertEqual(state, "不太舒服")
+        self.assertIn("精力几乎没有", store["校准补充行"])
+
+    def test_同传时state优先(self):
+        state, store = self.resolve(
+            {"state": "今天还行", "calibration": {"body": "有明显不适"}}, 90)
+        self.assertEqual(state, "今天还行")
+        self.assertIsNone(store)
+
+    def test_非法值忽略(self):
+        # 未知枚举值不进映射；time_budget 传布尔/负数不记
+        self.assertEqual(self.map_c({"energy": "满血", "body": "不知道"}, 90), (None, None))
+        self.assertEqual(self.map_c({"time_budget_min": True}, 90), (None, None))
+        self.assertEqual(self.map_c({"time_budget_min": -5}, 90), (None, None))
+        # 原样存储只留契约三键（防前端塞杂物进 conditions）
+        _, store = self.map_c({"body": "有明显不适", "杂物": "x"}, 90)
+        self.assertEqual(set(store["校准"].keys()), {"time_budget_min", "energy", "body"})
+
+
 class TestConfirmHintB1(unittest.TestCase):
     """V3 B1：/api/state confirm_hint 的纯函数估算（agent.build_confirm_hint）。
     不写库、不调模型，全部用构造档案 + 固定 now 验证边界。"""
