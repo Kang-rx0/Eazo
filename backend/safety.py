@@ -1,11 +1,13 @@
-# 安全边界核心逻辑（V2 文档三）。本文件只做三件事：
-#   l1_scan       —— L1 硬词表扫描（纯代码，毫秒级）
-#   merge_levels  —— 等级合并纯函数（代码优先，LLM 只能加严不能减轻）
-#   enforce       —— L3 输出后校验（S0 只搭骨架，S1 填充强制改写/数字校验/诊断过滤）
-# L2 专职分类器 safety_classify 在 S2 阶段加入本文件。
+# 安全边界核心逻辑（V2 文档三）。本文件做四件事：
+#   l1_scan         —— L1 硬词表扫描（纯代码，毫秒级）
+#   safety_classify —— L2 专职安全分类器（单独一次小模型调用，失败回退 L1）
+#   merge_levels    —— 等级合并纯函数（代码优先，LLM 只能加严不能减轻）
+#   enforce         —— L3 输出后校验（强制改写/数字校验/诊断过滤，纯代码）
+import json
 import logging
 import re
 
+from . import llm
 from . import safety_rules as rules
 
 logger = logging.getLogger(__name__)
@@ -160,18 +162,104 @@ def merge_levels(l1: dict, l2_level: str | None) -> str:
     return _max_level(l1["locked_level"], l2_level)
 
 
+# ---- L2 专职安全分类器（V2 文档 3.2）----
+# 单一任务：读一句话 → 定级 JSON。few-shot 例子按文档要求覆盖：明确危险 / 否定式 /
+# 已缓解但需警惕 / 慢性病+运动意图 / 用药咨询 / 心理低落 / 心理危机 / 完全正常。
+# 医学表述宁可朴素不要专业化（V2 文档九）。
+_CLASSIFY_PROMPT = """你是「最低自我照顾」产品的专职安全分类器。你只做一件事：读用户下班后说的一句话，判断其中的健康/心理风险等级，输出固定 JSON，不做任何其他事。
+
+输出格式（只输出这个 JSON，不要任何其他内容）：
+{"level": "none/caution/danger/crisis 之一", "category": "none/acute/chronic_exercise/medication/chronic_mention/mental_low/crisis 之一", "reason": "一句话判定依据"}
+
+等级标准：
+- danger：急性身体危险信号正在发生（胸闷、呼吸困难、剧烈疼痛、晕倒、心悸等）。
+- crisis：流露自伤、轻生、活不下去、撑不下去的念头。
+- caution：不到急性危险，但今晚不该安排运动，或需要提醒就医/转介——比如：症状今天出现过（即使说"好些了"）；有慢性病（高血压/糖尿病/哮喘等）又想运动；在咨询用药问题。
+- none：完全正常的日常表达；或症状明确是过去的事、已经好了。
+
+判定要点：
+1. 区分"已经过去"和"刚缓解"：旧伤旧病已恢复、不影响现在 → none；今天刚发生、刚缓解 → caution（今晚仍要保守）。
+2. 单纯情绪低落、自我贬低 → category=mental_low、level=none（产品会温和降载，不按安全事件处理）；出现"撑不住了/不想活/想消失"类表达 → crisis。
+3. 只提到自己有慢性病、没提运动没问用药 → category=chronic_mention、level=none。
+4. 单纯疲惫（"累死了""一点力气都没有"）不是安全风险 → none。
+5. 你只判级，不诊断疾病、不给任何建议。拿不准时往高了判（宁可误报，不可漏报）。
+
+标注例子：
+输入：今天胸口有点闷，喘不上气 → {"level":"danger","category":"acute","reason":"胸闷伴呼吸困难正在发生"}
+输入：以前跑步膝盖疼，现在不疼了 → {"level":"none","category":"none","reason":"旧伤已恢复，症状是过去式"}
+输入：下班路上有点头晕，现在好些了 → {"level":"caution","category":"acute","reason":"头晕今天发生过，刚缓解，今晚仍需保守"}
+输入：我有高血压，今晚想出出汗 → {"level":"caution","category":"chronic_exercise","reason":"慢性病叠加运动意图，需先咨询医生"}
+输入：我在吃降压药，晚上跑步会不会有影响？ → {"level":"caution","category":"medication","reason":"用药咨询应转介医生或药师"}
+输入：最近心情很差，觉得自己很没用 → {"level":"none","category":"mental_low","reason":"情绪低落，走温和降载即可"}
+输入：感觉撑不住了，不想再继续下去了 → {"level":"crisis","category":"crisis","reason":"流露难以为继的念头"}
+输入：中午吃了黄焖鸡 → {"level":"none","category":"none","reason":"日常饮食记录"}
+输入：下楼梯把脚崴了，还有点疼 → {"level":"caution","category":"acute","reason":"急性扭伤仍在疼，今晚应制动"}
+输入：我有糖尿病 → {"level":"none","category":"chronic_mention","reason":"仅提及慢性病，未涉及运动或用药"}
+输入：累死了，一点力气都没有 → {"level":"none","category":"none","reason":"疲惫不是安全风险，产品自会降载"}"""
+
+# L2 允许输出的类别（与 L1 的类别命名保持一致，enforce 按同一套类别执行）
+_L2_CATEGORIES = {"none", "acute", "chronic_exercise", "medication",
+                  "chronic_mention", "mental_low", "crisis"}
+
+
+def safety_classify(text: str, l1_result: dict) -> dict | None:
+    """L2 专职安全分类器：读一句话，输出 {"level","category","reason"}。
+
+    - 模型调用走 llm.chat()（内部已带 1 次重试 + 30s 超时，V2 文档惯例）。
+    - 任何失败（调用异常/输出不是 JSON/等级非法）→ 返回 None，调用方沿用 L1 结果并写 WARN。
+    - l1_result 仅用于日志对照，不注入提示词——L2 必须独立判断，否则词表的
+      候选命中（"疼"）会把它带偏，否定式就纠不回来了。
+    """
+    try:
+        msg = llm.chat([{"role": "system", "content": _CLASSIFY_PROMPT},
+                        {"role": "user", "content": f"输入：{text}"}])
+        m = re.search(r"\{.*\}", msg.content or "", re.S)
+        data = json.loads(m.group(0))
+        level = data.get("level")
+        if level not in rules.LEVEL_ORDER:
+            raise ValueError(f"L2 输出非法等级：{level!r}")
+        category = data.get("category")
+        result = {"level": level,
+                  "category": category if category in _L2_CATEGORIES else None,
+                  "reason": str(data.get("reason", ""))[:100]}
+        logger.info("安全L2判定 level=%s category=%s reason=%s（L1=%s）",
+                    result["level"], result["category"], result["reason"],
+                    l1_result["level"])
+        return result
+    except Exception:
+        logger.warning("安全L2分类器失败，沿用L1结果（L1=%s 文本=%s）",
+                       l1_result["level"], text[:50], exc_info=True)
+        return None
+
+
 def assess(texts: list[str]) -> dict:
     """输入侧检测总入口：把一批用户文本（当天自由输入、纠正项等）合并扫描，产出 safety_state。
 
-    S1 阶段只有 L1（L2 在此之后无条件缺席，merge 取保守结果）；S2 在这里接入 safety_classify。
+    流程（V2 三层架构的输入侧）：L1 词表扫描 → L2 分类器裁决 → merge 合并。
+    L2 的调用条件：有文本，且 L1 未锁 danger/crisis——已经锁死的等级 L2 动不了，
+    省一次调用；其余情况都过 L2，既裁决软词候选（否定式降级），也兜住词表漏掉的
+    说法（"撑不住了"类，L2 可加严）。L2 失败 → merge 自动退回 L1 保守结果。
     safety_state 是贯穿主流程的安全上下文，enforce/trace/日志都吃它。
     """
     joined = "\n".join(t for t in texts if t and t.strip())
     l1 = l1_scan(joined)
-    final = merge_levels(l1, None)  # S2 起：L2 裁决候选后再合并
-    return {"final_level": final, "category": l1["category"],
-            "categories": l1["categories"], "hits": l1["hits"],
-            "chronic_words": l1["chronic_words"], "l1": l1, "l2": None}
+    l2 = None
+    if joined and l1["locked_level"] not in ("danger", "crisis"):
+        l2 = safety_classify(joined, l1)
+    final = merge_levels(l1, l2["level"] if l2 else None)
+
+    # 类别归属：L2 抬高了等级（超过 L1 锁定下界）就采用 L2 的类别，否则保持 L1；
+    # L1 的锁定类别（组合规则）永远保留在 categories 里，enforce 按它执行
+    category, categories = l1["category"], list(l1["categories"])
+    if (l2 and l2["category"] and l2["category"] != "none"
+            and rules.LEVEL_ORDER[l2["level"]] > rules.LEVEL_ORDER[l1["locked_level"]]):
+        category = l2["category"]
+        if l2["category"] not in categories:
+            categories.append(l2["category"])
+
+    return {"final_level": final, "category": category,
+            "categories": categories, "hits": l1["hits"],
+            "chronic_words": l1["chronic_words"], "l1": l1, "l2": l2}
 
 
 # ---- L3 固定话术（V2 文档五；后端拼接，永不指望模型写）----

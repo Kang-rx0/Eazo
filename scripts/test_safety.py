@@ -1,10 +1,12 @@
 # 安全边界单元测试（纯 Python，不调模型）。随 S 阶段推进逐步扩充：
 #   S0：L1 扫描 / 等级合并只升不降 / enforce 骨架
 #   S1：L3 输出后校验——强制改写、话术拼接、数字校验、诊断断言过滤
+#   S2：L2 专职分类器——输出解析校验、失败/断网回退 L1、assess 三层串联（模型调用全部 mock）
 # 运行：/opt/miniconda3/envs/Eazo/bin/python scripts/test_safety.py
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 # 让脚本能 import backend 包
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -307,6 +309,110 @@ class TestEnforceL3(unittest.TestCase):
         out, _ = enforce(dict(FALLBACK_ADVICE), assess(["胸口闷喘不上气"]), [])
         self.assertIsNone(out["move"])
         self.assertEqual(out["see_doctor"], safety.SEE_DOCTOR_DANGER)
+
+
+class _FakeMsg:
+    """伪造 llm.chat 的返回消息。"""
+    def __init__(self, content):
+        self.content = content
+        self.tool_calls = None
+
+
+class TestSafetyClassify(unittest.TestCase):
+    """S2：L2 分类器的输出解析与失败回退（模型调用 mock，不走网络）。"""
+
+    def _l1(self, text=""):
+        return l1_scan(text)
+
+    def test_正常解析(self):
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"caution","category":"acute","reason":"头晕刚缓解"}')):
+            r = safety.safety_classify("下班路上有点头晕，现在好些了", self._l1("头晕"))
+        self.assertEqual(r, {"level": "caution", "category": "acute", "reason": "头晕刚缓解"})
+
+    def test_容错_markdown围栏也能解析(self):
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '```json\n{"level":"none","category":"none","reason":"正常"}\n```')):
+            r = safety.safety_classify("中午吃了黄焖鸡", self._l1())
+        self.assertEqual(r["level"], "none")
+
+    def test_非法等级返回None(self):
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"safe","category":"none","reason":"x"}')):
+            self.assertIsNone(safety.safety_classify("随便", self._l1()))
+
+    def test_非JSON输出返回None(self):
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg("我觉得没什么问题")):
+            self.assertIsNone(safety.safety_classify("随便", self._l1()))
+
+    def test_调用异常返回None(self):
+        with patch("backend.safety.llm.chat", side_effect=RuntimeError("断网")):
+            self.assertIsNone(safety.safety_classify("随便", self._l1()))
+
+    def test_非法类别置空但等级保留(self):
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"caution","category":"发烧类","reason":"x"}')):
+            r = safety.safety_classify("发烧", self._l1("发烧"))
+        self.assertEqual(r["level"], "caution")
+        self.assertIsNone(r["category"])
+
+
+class TestAssess(unittest.TestCase):
+    """S2：assess 三层串联——L2 裁决候选、加严兜底、断网退 L1、锁定跳过。"""
+
+    def test_否定式_L2澄清后不再误报(self):
+        # S0 记录的已知误报，S2 修复目标："以前跑步膝盖疼，现在不疼了" → none
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"none","category":"none","reason":"旧伤已恢复"}')):
+            state = assess(["以前跑步膝盖疼，现在不疼了"])
+        self.assertEqual(state["final_level"], "none")
+        self.assertEqual(state["l2"]["level"], "none")
+
+    def test_用例2_软词候选被L2确认为caution(self):
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"caution","category":"acute","reason":"今天发生过"}')):
+            state = assess(["下班路上有点头晕，现在好些了"])
+        self.assertEqual(state["final_level"], "caution")
+        self.assertEqual(state["category"], "acute")
+
+    def test_L2加严_词表漏掉的危机说法(self):
+        # "撑不住了"不在硬词表里（L1=none），L2 语义兜底可加严到 crisis
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"crisis","category":"crisis","reason":"难以为继的念头"}')):
+            state = assess(["感觉撑不住了，不想再继续下去了"])
+        self.assertEqual(state["l1"]["level"], "none")      # 词表确实没接住
+        self.assertEqual(state["final_level"], "crisis")     # L2 兜底加严
+        self.assertEqual(state["category"], "crisis")
+
+    def test_断网退L1仍安全(self):
+        # V2 文档 S2 验证条目：分类器故意断网 → 沿用 L1 保守结果
+        with patch("backend.safety.llm.chat", side_effect=RuntimeError("断网")):
+            state = assess(["下班路上有点头晕，现在好些了"])
+        self.assertIsNone(state["l2"])
+        self.assertEqual(state["final_level"], "caution")    # L1 候选保守生效
+        with patch("backend.safety.llm.chat", side_effect=RuntimeError("断网")):
+            state = assess(["我有高血压，今晚想出出汗"])
+        self.assertEqual(state["final_level"], "caution")    # 组合锁不受影响
+
+    def test_L2无权降级锁定结果(self):
+        # 组合规则锁 caution，L2 就算说 none 也压不动
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"none","category":"none","reason":"没事"}')):
+            state = assess(["我有高血压，今晚想多动一动出出汗"])
+        self.assertEqual(state["final_level"], "caution")
+        self.assertIn("chronic_exercise", state["categories"])
+
+    def test_L1锁danger时跳过L2(self):
+        with patch("backend.safety.llm.chat") as mock_chat:
+            state = assess(["今天胸口有点闷，喘不上气"])
+        mock_chat.assert_not_called()                        # 锁死的等级不浪费一次调用
+        self.assertEqual(state["final_level"], "danger")
+
+    def test_空文本不调L2(self):
+        with patch("backend.safety.llm.chat") as mock_chat:
+            state = assess([])
+        mock_chat.assert_not_called()
+        self.assertEqual(state["final_level"], "none")
 
 
 if __name__ == "__main__":
