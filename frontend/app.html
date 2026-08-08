@@ -64,6 +64,14 @@
         <li id="adv-move"></li>
         <li id="adv-stop"></li>
       </ul>
+      <!-- V2 安全模式：不建议做什么 + 就医提醒（语气温和，不是红色警报） -->
+      <div id="adv-avoid-wrap" style="display:none;">
+        <p style="margin:4px 0; color:#8a6d3b;">今晚先不：</p>
+        <ul id="adv-avoid-list" style="color:#8a6d3b; margin-top:0;"></ul>
+      </div>
+      <p id="adv-see-doctor" style="display:none; color:#a05252;"></p>
+      <p id="adv-severe-notice" style="display:none; color:#a05252;"></p>
+      <p id="adv-disclaimer" style="display:none; font-size:12px; color:#999;"></p>
       <p id="adv-sources" style="font-size:12px; color:#999;"></p>
       <p><button onclick="accept()">就这样</button> <span id="accept-msg" style="color:#2a7;"></span></p>
     </div>
@@ -346,19 +354,25 @@
         el.style.display = text ? '' : 'none';
         el.textContent = text || '';
       };
-      if (a.safety_flag) {
-        set('adv-judgement', a.judgement);
-        set('adv-reason', a.reason);
-        set('adv-eat', null); set('adv-move', null);
-        set('adv-stop', a.stop || '今晚好好休息，不舒服请及时就医');
-        set('adv-sources', null);
-        return;
-      }
+      // V2 起统一渲染：安全模式下 eat/move 已被后端 L3 置空，avoid/see_doctor 由后端拼好，
+      // 前端只负责展示（危机时整卡已被替换为求助文案，同样走这条路径）
       set('adv-judgement', a.judgement);
       set('adv-reason', a.reason);
       set('adv-eat', a.eat ? '吃：' + a.eat : null);
       set('adv-move', a.move ? '动：' + a.move : null);
       set('adv-stop', a.stop ? '停：' + a.stop : null);
+      const avoid = a.avoid || [];
+      document.getElementById('adv-avoid-wrap').style.display = avoid.length ? '' : 'none';
+      const avoidList = document.getElementById('adv-avoid-list');
+      avoidList.innerHTML = '';
+      for (const item of avoid) {
+        const li = document.createElement('li');
+        li.textContent = item;
+        avoidList.appendChild(li);
+      }
+      set('adv-see-doctor', a.see_doctor);
+      set('adv-severe-notice', a.severe_notice);
+      set('adv-disclaimer', a.disclaimer);
       set('adv-sources', a.sources && a.sources.length ? '参考依据：' + a.sources.join('、') : null);
     }
 
