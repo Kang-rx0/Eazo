@@ -138,11 +138,16 @@ TOOL_DEFS = [
         "type": "function",
         "function": {
             "name": "log_note",
-            "description": "把你从用户自由输入里提取到的关键条件记一笔（如从「加了三小时班」提取出「今晚到家晚、精力低」）。",
+            "description": "把你从用户输入里提取到的关键条件记一笔。durable=false 记今天的临时条件"
+                           "（如从「加了三小时班」提取「今晚到家晚、精力低」）；"
+                           "durable=true 记长期习惯/偏好（如「睡前喜欢喝一杯热牛奶」「不爱吃香菜」），"
+                           "会永久保存，今后每天生成建议时都会出现在【长期备注】里。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "提取出的关键条件，一句话"},
+                    "durable": {"type": "boolean",
+                                "description": "是否长期有效（习惯/偏好=true，仅今晚有效的状态=false）"},
                 },
                 "required": ["text"],
             },

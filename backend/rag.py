@@ -10,17 +10,21 @@ logger = logging.getLogger(__name__)
 
 _vectors = None          # 归一化后的语料向量矩阵，行号 = corpus_chunks.id - 1
 _chunks = None           # [(id, doc_name, category, chunk_text)]
+_loaded_mtime = None     # 已加载的 corpus.npz 修改时间，变了就重载
 
 
 def _load() -> bool:
-    """懒加载语料与向量。语料未构建时返回 False。"""
-    global _vectors, _chunks
-    if _vectors is not None:
-        return True
+    """懒加载语料与向量；corpus.npz 变化（重跑 build_corpus.py）时自动重载，不用重启服务。"""
+    global _vectors, _chunks, _loaded_mtime
     npz_path = config.DATA_DIR / "corpus.npz"
     if not npz_path.exists():
         logger.warning("rag 语料未构建（缺 %s），检索不可用", npz_path)
         return False
+    mtime = npz_path.stat().st_mtime
+    if _vectors is not None and mtime == _loaded_mtime:
+        return True
+    if _vectors is not None:
+        logger.info("rag 检测到 corpus.npz 更新，重新加载语料")
     vecs = np.load(npz_path)["vectors"]
     _vectors = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
     conn = db.get_conn()
@@ -36,6 +40,7 @@ def _load() -> bool:
             len(_chunks), len(_vectors),
         )
         return False
+    _loaded_mtime = mtime
     return True
 
 

@@ -29,11 +29,49 @@ def parse_header(text: str) -> dict:
     return meta
 
 
+# 句子结束标记（中英文），超长段落沿句子边界切，绝不拦腰截断
+_SENT_SPLIT = re.compile(r"(?<=[。！？!?；;])|(?<=[.!?] )")
+
+
+def _split_long_paragraph(p: str) -> list[str]:
+    """把超过 CHUNK_MAX 的段落按句子打包成多块，每块不超 CHUNK_MAX。
+    单句本身超长（极罕见）时保留为独立超长块，不硬切。
+    """
+    sentences = [s for s in _SENT_SPLIT.split(p) if s.strip()]
+    packed, cur = [], ""
+    for s in sentences:
+        if cur and len(cur) + len(s) > CHUNK_MAX:
+            packed.append(cur)
+            cur = s
+        else:
+            cur += s
+    if cur:
+        packed.append(cur)
+    return packed
+
+
 def split_chunks(text: str, doc_name: str) -> list[str]:
-    """按标题/空行切块，攒到 300–500 字一块，块首拼上文档名（提高检索质量）。"""
+    """按标题/空行切块，攒到 300–500 字一块，块首拼上文档名（提高检索质量）。
+    超长段落沿句子边界拆（C10 修复：不再按字数硬切导致句子被截断）。
+    """
     body = re.sub(r"<!--.*?-->", "", text, flags=re.S)
-    # 按标题行或空行切成段
-    parts = [p.strip() for p in re.split(r"\n#{1,3} |\n\n", body) if p.strip()]
+    # 按标题行或空行切成段；超长段先按句子拆小
+    raw_parts = [p.strip() for p in re.split(r"\n#{1,3} |\n\n", body) if p.strip()]
+    # 标题行（# 开头）并入紧随其后的正文段，避免标题孤零零挂在上一块末尾
+    joined = []
+    pending_header = None
+    for p in raw_parts:
+        if p.startswith("#"):
+            pending_header = p.lstrip("#").strip()
+            continue
+        if pending_header:
+            p = f"{pending_header}：{p}"
+            pending_header = None
+        joined.append(p)
+    parts = []
+    for p in joined:
+        parts += _split_long_paragraph(p) if len(p) > CHUNK_MAX else [p]
+
     chunks, current = [], ""
     for p in parts:
         if len(current) + len(p) <= CHUNK_MAX:
@@ -42,10 +80,6 @@ def split_chunks(text: str, doc_name: str) -> list[str]:
             if current:
                 chunks.append(current)
             current = p
-        # 单段过长直接成块
-        while len(current) > CHUNK_MAX:
-            chunks.append(current[:CHUNK_MAX])
-            current = current[CHUNK_MAX:]
     if current:
         chunks.append(current)
     # 过短的尾块并入前一块

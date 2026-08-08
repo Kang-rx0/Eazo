@@ -28,7 +28,8 @@ SYSTEM_PROMPT = """你是一个「最低自我照顾」助手，服务对象是�
    如果用户明确表达精疲力尽（如"累死了""累瘫了""一点力气都没有"）或加班到很晚，主动撤掉运动安排（move 置 null），只保留吃什么和几点停——今晚能好好吃饭、按时睡觉就已经达标。
 8. 涉及热量/蛋白质量级时，用 calc_body_metrics 工具取数，不要自己心算；数字只用来定量级和方向。
    本轮没调用该工具，就绝对不要在输出里出现任何 kcal/克数——宁可不提数字。
-9. 最终输出必须是 JSON（格式见下），不要输出其他内容。
+9. 用户提到长期习惯或偏好（如"我习惯睡前喝杯热牛奶""我不爱吃香菜"），用 log_note 的 durable=true 记下来——它会永久保存，今后每天都会出现在【长期备注】里；今晚才有效的状态（累、加班、时间少）用 durable=false。
+10. 最终输出必须是 JSON（格式见下），不要输出其他内容。
 
 最终输出 JSON 格式：
 {
@@ -111,8 +112,10 @@ def build_context(user_id: int, baseline_level: int, extra_conditions: list[str]
     today_inputs = [i for i in history["用户自由输入"] if i["日期"] == today]
     recent = [r for r in history["每日建议与反馈"] if r["日期"] != today]
 
+    user_notes = db.get_user_notes(user_id)
     lines = [
         f"【用户档案】{_fmt_profile(p)}",
+        f"【长期备注】{'；'.join(user_notes) if user_notes else '（暂无）'}",
         f"【当前虚拟时间】{clock.now_display()}",
         f"【今天已知】到家时间估计 {_estimate_home_time(p)}"
         + (f"；已记录饮食：{json.dumps(today_meals, ensure_ascii=False)}" if today_meals else "；今天暂无饮食记录")
@@ -146,19 +149,31 @@ def _parse_advice(content: str):
 
 
 def _exec_tool(name: str, args: dict, user_id: int, notes: list[str]):
-    """执行一个工具调用，返回可 JSON 化的结果。"""
-    if name == "search_reference":
-        return tools.search_reference(args.get("query", ""), args.get("category", "any"))
-    if name == "get_user_history":
-        return tools.get_user_history(user_id, args.get("days", 3))
-    if name == "log_note":
-        note = args.get("text", "")
-        if note:
-            notes.append(note)
-        return {"ok": True, "已记录": note}
-    if name == "calc_body_metrics":
-        return tools.calc_body_metrics(user_id)
-    return {"error": f"未知工具 {name}"}
+    """执行一个工具调用，返回可 JSON 化的结果。
+    任何工具抛异常都兜住返回错误信息给模型，绝不让整次请求 500（演示不死）。
+    """
+    try:
+        if name == "search_reference":
+            return tools.search_reference(args.get("query", ""), args.get("category", "any"))
+        if name == "get_user_history":
+            return tools.get_user_history(user_id, args.get("days", 3))
+        if name == "log_note":
+            note = args.get("text", "")
+            durable = bool(args.get("durable", False))
+            if note:
+                notes.append(note)
+                if durable:
+                    added = db.add_user_note(user_id, clock.today(), note)
+                    logger.info("user_id=%s log_note 长期备注%s：%s",
+                                user_id, "新增" if added else "已存在", note)
+                    return {"ok": True, "已记录": note, "长期保存": True}
+            return {"ok": True, "已记录": note}
+        if name == "calc_body_metrics":
+            return tools.calc_body_metrics(user_id)
+        return {"error": f"未知工具 {name}"}
+    except Exception:
+        logger.error("工具 %s 执行失败，返回错误给模型继续", name, exc_info=True)
+        return {"error": f"工具 {name} 执行出错，请基于已有信息继续"}
 
 
 def _save_trace(username: str, trace: dict) -> None:

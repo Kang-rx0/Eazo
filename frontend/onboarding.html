@@ -106,7 +106,6 @@
   <p><button id="submit-btn" onclick="submitOnboarding()">完成，进入主界面</button></p>
   <p id="msg" style="color: #c00;"></p>
   <p id="success-msg" style="display:none; color: #2a7;">已保存 ✓（修改资料不会自动重出今晚建议，可回主界面用「一击纠正」或补一句话让它重新想）</p>
-  <p id="loading" style="display:none;">正在为你生成今晚的第一份建议，大约需要十几秒…</p>
 
   <script>
     const token = localStorage.getItem('token');
@@ -172,18 +171,16 @@
         height_cm: num('height_cm'),
         weight_kg: num('weight_kg'),
       };
-      // 首次提交后端会跑 Agent 生成首夜建议，需要一点时间；编辑模式只保存
+      // 只保存档案（首夜建议由用户在主界面点「下班了」触发）
       document.getElementById('submit-btn').disabled = true;
       document.getElementById('msg').textContent = '';
       document.getElementById('success-msg').style.display = 'none';
-      if (!editMode) document.getElementById('loading').style.display = 'block';
       const res = await fetch('/api/onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
         body: JSON.stringify(payload),
       });
       document.getElementById('submit-btn').disabled = false;
-      document.getElementById('loading').style.display = 'none';
       if (!res.ok) {
         document.getElementById('msg').textContent = '保存失败，请重试';
         return;

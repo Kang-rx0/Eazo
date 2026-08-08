@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS corpus_chunks (
     chunk_text TEXT NOT NULL    -- 向量存 data/corpus.npz，行号对应 id
 );
 
+CREATE TABLE IF NOT EXISTS user_notes (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    vday    TEXT NOT NULL,      -- 记下这条备注的虚拟日期
+    note    TEXT NOT NULL       -- 长期习惯/偏好，如"睡前喜欢喝一杯热牛奶"
+);
+
 CREATE TABLE IF NOT EXISTS app_clock (
     id          INTEGER PRIMARY KEY CHECK (id = 1),  -- 全局唯一一行
     virtual_now TEXT NOT NULL                        -- ISO 字符串
@@ -326,5 +333,36 @@ def set_free_input_extracted(free_input_id: int, extracted_json: str) -> None:
             (extracted_json, free_input_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------- 长期备注（B6：用户的持久习惯/偏好，每次生成建议都注入） ----------
+
+def add_user_note(user_id: int, vday: str, note: str) -> bool:
+    """存一条长期备注。完全相同的内容不重复存，返回是否新增。"""
+    conn = get_conn()
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM user_notes WHERE user_id = ? AND note = ?", (user_id, note)
+        ).fetchone()
+        if exists:
+            return False
+        conn.execute(
+            "INSERT INTO user_notes (user_id, vday, note) VALUES (?, ?, ?)",
+            (user_id, vday, note),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_user_notes(user_id: int) -> list:
+    conn = get_conn()
+    try:
+        return [r["note"] for r in conn.execute(
+            "SELECT note FROM user_notes WHERE user_id = ? ORDER BY id", (user_id,)
+        ).fetchall()]
     finally:
         conn.close()

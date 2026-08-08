@@ -174,11 +174,14 @@
       else show('home-view');
     }
 
-    // 「下班了」：可能先要收昨晚回执（文档 7.2）
+    // 「下班了」：可能先要收昨晚回执（文档 7.2）。请求期间禁用按钮，防双击重复触发
     async function offwork() {
+      const btn = document.getElementById('offwork-btn');
+      btn.disabled = true;
       setLoading(true);
       const data = await api('/api/offwork');
       setLoading(false);
+      btn.disabled = false;
       if (!data) return;
       if (data.need_feedback) {
         const a = data.record.advice || {};
@@ -222,7 +225,13 @@
       setLoading(false);
       if (data && data.advice) {
         renderAdvice(data.advice); show('advice-view');
-        toast(`已按「${type}」重新生成 ✓`);
+        if (data.yesterday_updated) {
+          // 「其实我做了」顺手把昨晚回执改成了完成了
+          if (yesterdayFb) { yesterdayFb.feedback = '完成了'; renderYesterdayLine(yesterdayFb); }
+          toast('已把昨晚记为「完成了」，档位重算，建议已更新 ✓');
+        } else {
+          toast(`已按「${type}」重新生成 ✓`);
+        }
       } else {
         toast((data && data.error) || '重新生成失败，请重试', true);
       }

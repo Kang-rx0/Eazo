@@ -5,6 +5,7 @@ import json
 import logging
 import secrets
 import sqlite3
+import threading
 import time
 
 import re
@@ -110,8 +111,8 @@ async def api_profile(request: Request):
 
 @app.post("/api/onboarding")
 async def api_onboarding(payload: dict, request: Request):
-    """首次填信息：写入 profiles + 生成首夜建议。
-    档案已存在时是「修改资料」：只保存，不重新生成建议（用户可回主界面用纠正/补一句话触发重出）。
+    """填信息只保存档案，不自动生成建议——首夜建议由用户自己点「下班了」触发。
+    档案已存在时是「修改资料」：同样只保存。
     """
     user_id = _current_user_id(request)
     if user_id is None:
@@ -122,24 +123,23 @@ async def api_onboarding(payload: dict, request: Request):
     if is_update:
         logger.info("user=%s event=profile_update 资料已修改", username)
         return {"ok": True, "updated": True}
-    logger.info("user=%s event=onboarding 档案已保存，开始生成首夜建议", username)
-
-    advice, _trace = agent.run_agent(user_id, username, baseline_level=3)
-    db.insert_daily_record(
-        user_id, clock.today(),
-        conditions_json=json.dumps(
-            {"来源": "onboarding首夜", "档位": 3, "agent_notes": advice.get("agent_notes", [])},
-            ensure_ascii=False),
-        advice_json=json.dumps(advice, ensure_ascii=False),
-        baseline_level=3,
-    )
-    return {"ok": True, "advice": advice}
+    logger.info("user=%s event=onboarding 档案已保存", username)
+    return {"ok": True}
 
 
 # ---------- 每日触点闭环（M4：文档 3.2 / 7.2 / 7.4 / 第九节） ----------
 
 FEEDBACK_OPTIONS = ("完成了", "只完成一部分", "完全没完成", "建议仍然太难", "跳过")
 CORRECT_TYPES = ("今晚更累", "时间更少", "不太舒服", "今天还行", "其实我做了")
+
+# 每用户一把锁：防止双击「下班了」并发生成两条当日记录（B9）
+_offwork_locks: dict[int, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _user_lock(user_id: int) -> threading.Lock:
+    with _locks_guard:
+        return _offwork_locks.setdefault(user_id, threading.Lock())
 
 
 def _compute_today_baseline(user_id: int) -> int:
@@ -201,30 +201,32 @@ async def api_offwork(request: Request):
     username = db.get_username(user_id)
     today = clock.today()
 
-    # 当天已有建议 → 直接返回（界面回到建议卡片）
-    existing = db.get_daily_record(user_id, today)
-    if existing and existing["advice_json"]:
-        return {"advice": json.loads(existing["advice_json"]), "already_generated": True}
+    # 双击/并发防护：同一用户的「下班了」串行执行（B9）
+    with _user_lock(user_id):
+        # 当天已有建议 → 直接返回（界面回到建议卡片；双击的第二次会走到这）
+        existing = db.get_daily_record(user_id, today)
+        if existing and existing["advice_json"]:
+            return {"advice": json.loads(existing["advice_json"]), "already_generated": True}
 
-    # 昨日及更早的未回执：只对最近一天弹回执，更早的标「未响应」（沉默也是数据）
-    pending = db.get_pending_records_before(user_id, today)
-    if pending:
-        latest = pending[-1]
-        for old in pending[:-1]:
-            db.set_feedback(old["id"], "未响应")
-            logger.info("user=%s record=%s vday=%s 标记为未响应", username, old["id"], old["vday"])
-        return {
-            "need_feedback": True,
-            "record": {
-                "record_id": latest["id"],
-                "vday": latest["vday"],
-                "advice": json.loads(latest["advice_json"]) if latest["advice_json"] else None,
-            },
-        }
+        # 昨日及更早的未回执：只对最近一天弹回执，更早的标「未响应」（沉默也是数据）
+        pending = db.get_pending_records_before(user_id, today)
+        if pending:
+            latest = pending[-1]
+            for old in pending[:-1]:
+                db.set_feedback(old["id"], "未响应")
+                logger.info("user=%s record=%s vday=%s 标记为未响应", username, old["id"], old["vday"])
+            return {
+                "need_feedback": True,
+                "record": {
+                    "record_id": latest["id"],
+                    "vday": latest["vday"],
+                    "advice": json.loads(latest["advice_json"]) if latest["advice_json"] else None,
+                },
+            }
 
-    logger.info("user=%s event=offwork 触发建议生成", username)
-    advice = _run_and_save_today(user_id, username)
-    return {"advice": advice}
+        logger.info("user=%s event=offwork 触发建议生成", username)
+        advice = _run_and_save_today(user_id, username)
+        return {"advice": advice}
 
 
 @app.post("/api/feedback")
@@ -288,14 +290,35 @@ async def api_correct(payload: dict, request: Request):
     username = db.get_username(user_id)
     logger.info("user=%s event=correct type=%s 重跑建议", username, ctype)
 
+    # 「其实我做了」＝昨晚的回执报错了：把昨天记录改成「完成了」，档位跟着重算（B7）
+    yesterday_updated = False
+    record = dict(record)
+    if ctype == "其实我做了":
+        last = db.get_last_records_before(user_id, clock.today(), limit=1)
+        if last and last[0]["feedback"] != "完成了":
+            db.set_feedback(last[0]["id"], "完成了")
+            yesterday_updated = True
+            logger.info("user=%s 「其实我做了」：昨日(%s)回执改为完成了", username, last[0]["vday"])
+            new_level = _compute_today_baseline(user_id)
+            if new_level != record["baseline_level"]:
+                conn = db.get_conn()
+                try:
+                    conn.execute("UPDATE daily_records SET baseline_level = ? WHERE id = ?",
+                                 (new_level, record["id"]))
+                    conn.commit()
+                finally:
+                    conn.close()
+                record["baseline_level"] = new_level
+
     conditions = json.loads(record["conditions_json"] or "{}")
     corrections = conditions.get("纠正", [])
     corrections.append(ctype)
     conditions["纠正"] = corrections
-    record = dict(record) | {"conditions_json": json.dumps(conditions, ensure_ascii=False)}
+    conditions["档位"] = record["baseline_level"]
+    record["conditions_json"] = json.dumps(conditions, ensure_ascii=False)
     extra = [f"用户一击纠正：{c}" for c in corrections]
     advice = _run_and_save_today(user_id, username, record=record, extra_conditions=extra)
-    return {"advice": advice}
+    return {"advice": advice, "yesterday_updated": yesterday_updated}
 
 
 @app.post("/api/free_input")
@@ -353,9 +376,13 @@ async def api_agent_trace(request: Request):
     if user_id is None:
         return JSONResponse(status_code=401, content={"error": "未登录"})
     username = db.get_username(user_id)
-    # 严格匹配 "日期_用户名_时分秒.json"，避免用户名互为前缀时（a 和 a_b）串轨迹
+    # 严格匹配 "日期_用户名_时分秒.json"，避免用户名互为前缀时（a 和 a_b）串轨迹。
+    # 按文件真实修改时间取最新——文件名里是虚拟时间，演示中时钟往回拨会让名字排序失真。
     pattern = re.compile(rf"^\d{{4}}-\d{{2}}-\d{{2}}_{re.escape(username)}_\d{{4,6}}\.json$")
-    files = sorted(f for f in config.TRACE_DIR.glob("*.json") if pattern.match(f.name))
+    files = sorted(
+        (f for f in config.TRACE_DIR.glob("*.json") if pattern.match(f.name)),
+        key=lambda f: f.stat().st_mtime,
+    )
     if not files:
         return {"trace": None}
     data = json.loads(files[-1].read_text(encoding="utf-8"))
