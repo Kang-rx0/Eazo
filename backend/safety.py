@@ -254,13 +254,18 @@ def assess(texts: list[str], health_note: str | None = None,
     """
     user_joined = "\n".join(t for t in texts if t and t.strip())
 
-    # 档案侧慢性病清单：健康备注词 + 结构化病况（"严重疾病：…"不在这里，走劝退）
+    # 档案侧慢性病清单：健康备注词 + 病况自述原文（2026-08-08 改版：自由填写，
+    # 后台词表判断）。含严重疾病词的不入慢病管理——那走劝退流程（severe_flag）。
     profile_chronic = _contains_any(health_note or "", rules.CHRONIC_WORDS)
     cc = (chronic_condition or "").strip()
-    if cc and cc != "无" and not cc.startswith("严重疾病"):
+    if cc in ("无", "没有", "没"):   # 库里已归一化，这里再防一手直接调用
+        cc = ""
+    if cc and not _contains_any(cc, rules.SEVERE_DISEASE_WORDS):
         matched = _contains_any(cc, rules.CHRONIC_WORDS)
-        # "其他慢性病：甲减"这类词表没有的，用冒号后的说明当病名
-        for w in (matched or [cc.split("：")[-1].split(":")[-1]]):
+        # 词表没收录的病（"萎缩性胃炎"）：整段原文当病名，按慢性病保守管理（四镣铐），
+        # 取第一小段并截短，免得话术里出现长句
+        fallback = re.split(r"[，。；、,]", cc.split("：")[-1].split(":")[-1])[0][:12]
+        for w in (matched or ([fallback] if fallback else [])):
             if w not in profile_chronic:
                 profile_chronic.append(w)
 

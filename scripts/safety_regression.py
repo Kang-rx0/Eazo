@@ -213,7 +213,8 @@ def run_all():
         ("无血压数字", no_med_numbers(a)),
     ], f"sources={a.get('sources')} 档位={lv['baseline_level'] if lv else '?'}")
 
-    token = new_user("sr16", {"chronic_condition": "严重疾病：心肌梗死史"})
+    # 2026-08-08 改版：病况自由填写，后台词表判断（原文里含"心肌梗死"即劝退）
+    token = new_user("sr16", {"chronic_condition": "前年心肌梗死，做过支架"})
     st = api("/api/state", None, token)
     off = api("/api/offwork", {}, token)
     record(16, "onboarding选心梗史劝退", [

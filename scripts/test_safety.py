@@ -533,16 +533,31 @@ class TestS4ChronicTwoTier(unittest.TestCase):
         self.assertEqual(state["final_level"], "caution")
         self.assertIn("chronic_exercise", state["categories"])
 
-    def test_结构化病况解析(self):
+    def test_病况自述解析(self):
+        # 2026-08-08 改版：病况是用户自由填写的原文，分类判断全在后台词表
         with patch("backend.safety.llm.chat") as m:
+            self.assertEqual(assess([], chronic_condition="高血压五六年了")["chronic_profile"],
+                             ["高血压"])           # 原文里的词表命中
+            self.assertEqual(assess([], chronic_condition="有高血压，还有点痛风")
+                             ["chronic_profile"], ["高血压", "痛风"])   # 多病共存
             self.assertEqual(assess([], chronic_condition="2型糖尿病")["chronic_profile"],
-                             ["糖尿病"])          # 词表子串命中
-            self.assertEqual(assess([], chronic_condition="其他慢性病：甲状腺功能减退")
-                             ["chronic_profile"], ["甲状腺功能减退"])  # 冒号后说明当病名
-            self.assertEqual(assess([], chronic_condition="严重疾病：心肌梗死史")
-                             ["chronic_profile"], [])   # 严重疾病走劝退，不入慢病管理
+                             ["糖尿病"])
+            self.assertEqual(assess([], chronic_condition="萎缩性胃炎，老毛病了")
+                             ["chronic_profile"], ["萎缩性胃炎"])  # 词表没有的按原文保守管理
+            self.assertEqual(assess([], chronic_condition="前年心肌梗死")["chronic_profile"],
+                             [])                    # 严重疾病词走劝退，不入慢病管理
             self.assertEqual(assess([], chronic_condition="无")["chronic_profile"], [])
             m.assert_not_called()
+
+    def test_病况自述severe派生(self):
+        # db.upsert_profile 的 severe_flag 用词表扫描原文派生
+        from backend import safety_rules
+        hit = lambda cc: any(w in cc for w in safety_rules.SEVERE_DISEASE_WORDS)
+        self.assertTrue(hit("前年心肌梗死"))
+        self.assertTrue(hit("装了心脏起搏器"))
+        self.assertTrue(hit("怀孕三个月"))
+        self.assertFalse(hit("高血压五六年了"))
+        self.assertFalse(hit("2型糖尿病"))
 
     def test_严重疾病_自述与问句区分(self):
         # 自述 → 写档案劝退；问句 → 只当晚安全模式（劝退是持久动作，不适用"宁可误报"）

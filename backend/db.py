@@ -3,7 +3,7 @@ import logging
 import sqlite3
 from datetime import datetime
 
-from . import config
+from . import config, safety_rules
 
 logger = logging.getLogger(__name__)
 
@@ -194,11 +194,17 @@ def get_user_id_by_token(token: str):
 def upsert_profile(user_id: int, fields: dict) -> None:
     """写入/覆盖用户档案。fields 只取 PROFILE_FIELDS 白名单里的键。
 
-    severe_flag 不收前端值，每次都从 chronic_condition 重新派生（选"严重疾病"→1）。
-    这同时是误报纠正通道：自由输入触发的劝退标记，用户改「我的资料」即可解除/确认。
+    chronic_condition 是用户自由填写的确诊疾病原文（2026-08-08 改版：不再是结构化单选，
+    分类判断全在后台）："无/没有"归一化为空；severe_flag 不收前端值，每次都用严重疾病
+    词表扫描原文重新派生。这同时是误报纠正通道：自由输入触发的劝退标记，用户改
+    「我的资料」删掉相应文字即可解除。
     """
     data = {k: fields.get(k) for k in PROFILE_FIELDS}
-    data["severe_flag"] = 1 if str(data.get("chronic_condition") or "").startswith("严重疾病") else 0
+    cc = str(data.get("chronic_condition") or "").strip()
+    if cc in ("无", "没有", "没", "无。", "没有。"):
+        cc = ""
+    data["chronic_condition"] = cc or None
+    data["severe_flag"] = 1 if any(w in cc for w in safety_rules.SEVERE_DISEASE_WORDS) else 0
     cols = ", ".join(data.keys())
     marks = ", ".join(["?"] * len(data))
     conn = get_conn()
