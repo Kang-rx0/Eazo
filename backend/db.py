@@ -31,7 +31,10 @@ CREATE TABLE IF NOT EXISTS profiles (
     gender            TEXT,    -- 计算参数，全部可跳过
     age               INTEGER,
     height_cm         REAL,
-    weight_kg         REAL
+    weight_kg         REAL,
+    chronic_condition TEXT,    -- V2：结构化病况（无/高血压/2型糖尿病/其他慢性病：…/严重疾病：…）
+    doctor_advice     TEXT,    -- V2：医嘱（可选多行），注入为硬约束
+    severe_flag       INTEGER DEFAULT 0  -- V2：严重疾病劝退标记（1=rejected 视图）
 );
 
 CREATE TABLE IF NOT EXISTS daily_records (
@@ -103,6 +106,7 @@ PROFILE_FIELDS = [
     "off_work_start", "off_work_end", "overtime_freq", "commute_min",
     "work_body_state", "cooking", "diet_restrictions", "health_note",
     "wake_time", "exercise_base", "gender", "age", "height_cm", "weight_kg",
+    "chronic_condition", "doctor_advice",   # V2：severe_flag 不在白名单——由后端派生，前端改不了
 ]
 
 
@@ -111,11 +115,17 @@ def init_db() -> None:
     conn = get_conn()
     try:
         conn.executescript(_SCHEMA)
-        # 轻量迁移：老库的 profiles 缺 wake_time 列时补上（SQLite 不支持 IF NOT EXISTS 加列）
+        # 轻量迁移：老库的 profiles 缺列时补上（SQLite 不支持 IF NOT EXISTS 加列）
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(profiles)")]
         if "wake_time" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN wake_time TEXT")
             logger.info("db 迁移：profiles 表补充 wake_time 列")
+        # V2 安全边界（S4）：结构化病况 / 医嘱 / 严重疾病劝退标记
+        for col, ddl in (("chronic_condition", "TEXT"), ("doctor_advice", "TEXT"),
+                         ("severe_flag", "INTEGER DEFAULT 0")):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE profiles ADD COLUMN {col} {ddl}")
+                logger.info("db 迁移：profiles 表补充 %s 列", col)
         # 播种虚拟时钟：仅在首次初始化时用一次系统时间做起点，
         # 之后全后端业务逻辑一律走 clock.now()，禁止直接用系统时间。
         row = conn.execute("SELECT virtual_now FROM app_clock WHERE id = 1").fetchone()
@@ -182,8 +192,13 @@ def get_user_id_by_token(token: str):
 
 
 def upsert_profile(user_id: int, fields: dict) -> None:
-    """写入/覆盖用户档案。fields 只取 PROFILE_FIELDS 白名单里的键。"""
+    """写入/覆盖用户档案。fields 只取 PROFILE_FIELDS 白名单里的键。
+
+    severe_flag 不收前端值，每次都从 chronic_condition 重新派生（选"严重疾病"→1）。
+    这同时是误报纠正通道：自由输入触发的劝退标记，用户改「我的资料」即可解除/确认。
+    """
     data = {k: fields.get(k) for k in PROFILE_FIELDS}
+    data["severe_flag"] = 1 if str(data.get("chronic_condition") or "").startswith("严重疾病") else 0
     cols = ", ".join(data.keys())
     marks = ", ".join(["?"] * len(data))
     conn = get_conn()
@@ -192,6 +207,20 @@ def upsert_profile(user_id: int, fields: dict) -> None:
         conn.execute(
             f"INSERT INTO profiles (user_id, {cols}) VALUES (?, {marks})",
             (user_id, *data.values()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_severe(user_id: int, source_note: str) -> None:
+    """严重疾病劝退标记（自由输入/纠正入口，V2 文档 4.4）：写入档案，后续等同劝退。
+    chronic_condition 同时记来源说明，让用户在「我的资料」里看得到、改得了。"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE profiles SET severe_flag = 1, chronic_condition = ? WHERE user_id = ?",
+            (f"严重疾病：{source_note}", user_id),
         )
         conn.commit()
     finally:

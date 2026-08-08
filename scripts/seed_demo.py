@@ -108,6 +108,55 @@ def main() -> None:
     print(f"  前天({d2})：建议已完成；昨天({d1})：待回执 + 中午黄焖鸡记录")
     print("  演示流程：登录 → 点「下班了」→ 先收昨晚回执 → 生成今晚建议")
 
+    seed_chronic_personas()
+
+
+def seed_chronic_personas() -> None:
+    """V2 S4 慢性病演示人设（文档 4.5）：
+    demo_dm2 —— 2型糖尿病 + 医嘱示例（演示"医嘱强参考"路径）
+    demo_hbp —— 高血压 + 无医嘱（演示"戴镣铐给建议"路径）
+    只建档案不造历史：首晚建议由演示者点「下班了」现场生成。幂等：重跑先删旧账号。
+    """
+    personas = [
+        ("demo_dm2", {
+            "chronic_condition": "2型糖尿病",
+            "doctor_advice": "晚餐主食减半、不吃甜食；饭后可以散步 20 分钟左右；不要做剧烈运动",
+        }),
+        ("demo_hbp", {
+            "chronic_condition": "高血压",
+            "doctor_advice": None,
+        }),
+    ]
+    conn = db.get_conn()
+    try:
+        for username, extra in personas:
+            old = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+            if old:
+                uid = old["id"]
+                for table in ("daily_records", "meal_records", "free_inputs", "profiles",
+                              "sessions", "user_notes"):
+                    conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (uid,))
+                conn.execute("DELETE FROM users WHERE id = ?", (uid,))
+            salt = secrets.token_hex(8)
+            pw_hash = salt + "$" + hashlib.sha256((salt + PASSWORD).encode()).hexdigest()
+            uid = conn.execute(
+                "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+                (username, pw_hash, clock.now().isoformat()),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO profiles (user_id, off_work_start, off_work_end, overtime_freq, "
+                "commute_min, work_body_state, cooking, diet_restrictions, health_note, "
+                "wake_time, exercise_base, gender, age, height_cm, weight_kg, "
+                "chronic_condition, doctor_advice, severe_flag) "
+                "VALUES (?, '18:00', '19:00', '偶尔加班', 30, '久坐', '只能外卖', NULL, NULL, "
+                "'07:00', '无/偶尔', '女', 45, 160, 62, ?, ?, 0)",
+                (uid, extra["chronic_condition"], extra["doctor_advice"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"慢性病演示人设已就绪：demo_dm2（2型糖尿病，有医嘱）/ demo_hbp（高血压，无医嘱），密码同 {PASSWORD}")
+
 
 if __name__ == "__main__":
     main()

@@ -83,6 +83,15 @@
     </div>
   </div>
 
+  <!-- V2 S4：严重疾病温和劝退视图（语气抱歉而非拒斥，保留改资料的出口） -->
+  <div id="rejected-view" style="display:none;" class="card">
+    <h2>抱歉，这里帮不上你</h2>
+    <p id="rejected-msg"></p>
+    <p style="font-size:13px; color:#666;">
+      如果是选错了或情况有变，可以去<a href="onboarding.html?edit=1">我的资料</a>里修改。
+    </p>
+  </div>
+
   <!-- 补充一句 / 拍一下（文档 3.2 / 7.3；不做成首屏主角） -->
   <div id="input-bar" style="display:none; margin-top:16px;">
     <input id="free-text" placeholder="补充一句：加班了 / 中午吃了什么…" size="36">
@@ -113,12 +122,12 @@
     const AUTH = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
 
     function show(viewId) {
-      for (const id of ['home-view', 'feedback-view', 'advice-view']) {
+      for (const id of ['home-view', 'feedback-view', 'advice-view', 'rejected-view']) {
         document.getElementById(id).style.display = id === viewId ? 'block' : 'none';
       }
-      // 自由输入框在 home / advice 视图都可用，回执时收起
+      // 自由输入框在 home / advice 视图都可用，回执与劝退视图收起
       document.getElementById('input-bar').style.display =
-        viewId === 'feedback-view' ? 'none' : 'block';
+        (viewId === 'feedback-view' || viewId === 'rejected-view') ? 'none' : 'block';
     }
 
     function setLoading(on) {
@@ -169,6 +178,11 @@
       const state = await res.json();
       if (state.view === 'onboarding') { location.href = 'onboarding.html'; return; }
       document.getElementById('clock-display').textContent = state.virtual_now_display;
+      if (state.view === 'rejected') {
+        document.getElementById('rejected-msg').textContent = state.message || '';
+        show('rejected-view');
+        return;
+      }
       renderYesterdayLine(state.yesterday_feedback);
       if (state.view === 'advice') { renderAdvice(state.today_advice); show('advice-view'); }
       else show('home-view');
@@ -183,6 +197,7 @@
       setLoading(false);
       btn.disabled = false;
       if (!data) return;
+      if (data.rejected) { await refreshState(); return; }   // 劝退用户：转劝退视图
       if (data.need_feedback) {
         const a = data.record.advice || {};
         document.getElementById('fb-question').textContent =
@@ -223,6 +238,7 @@
       setLoading(true);
       const data = await api('/api/correct', { type });
       setLoading(false);
+      if (data && data.rejected) { await refreshState(); return; }   // 劝退用户
       if (data && data.advice) {
         renderAdvice(data.advice); show('advice-view');
         if (data.yesterday_updated) {
@@ -247,10 +263,14 @@
       setLoading(false);
       if (!data) return;
       if (data.error) { toast(data.error, true); return; }
+      if (data.rejected) { await refreshState(); return; }   // 劝退用户：转劝退视图
       input.value = '';
       if (data.advice) {
         renderAdvice(data.advice); show('advice-view');
-        toast('已把这句话考虑进去，建议已更新 ✓');
+        // 自由输入触发严重疾病标记：当晚仍显示安全模式建议，同时明确告知产品不适用
+        toast(data.advice.severe_notice
+              ? data.advice.severe_notice
+              : '已把这句话考虑进去，建议已更新 ✓', !!data.advice.severe_notice);
       } else {
         toast(data.message || '已记下 ✓');
       }

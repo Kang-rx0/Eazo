@@ -31,6 +31,8 @@ SYSTEM_PROMPT = """你是一个「最低自我照顾」助手，服务对象是�
    本轮没调用该工具，就绝对不要在输出里出现任何 kcal/克数——宁可不提数字。
 9. 用户提到长期习惯或偏好（如"我习惯睡前喝杯热牛奶""我不爱吃香菜"），用 log_note 的 durable=true 记下来——它会永久保存，今后每天都会出现在【长期备注】里；今晚才有效的状态（累、加班、时间少）用 durable=false。
 10. 最终输出必须是 JSON（格式见下），不要输出其他内容。
+11. 上下文若出现【医嘱】行（硬约束，优先级高于一切手册建议）：建议不得与医嘱冲突；医嘱覆盖的方面（如吃什么、能不能动）以医嘱为准，你只做医嘱框架内的最小化安排；医嘱里若有药名/剂量，只说"按医嘱执行"，绝不复述、不解释药理。
+    上下文若出现【慢性病档案】行：运动安排最多散步/拉伸级，绝不出现任何血压/血糖数值，饮食从清淡保守安排。
 
 最终输出 JSON 格式：
 {
@@ -128,6 +130,14 @@ def build_context(user_id: int, baseline_level: int, extra_conditions: list[str]
         f"档位表 4={BASELINE_DESC[4]} / 3={BASELINE_DESC[3]} / 2={BASELINE_DESC[2]} / "
         f"1={BASELINE_DESC[1]} / 0={BASELINE_DESC[0]}）",
     ]
+    # 【慢性病档案】/【医嘱】注入（V2 文档 4.2/4.3）：档案登记的慢性病每晚都带着
+    cc = (p["chronic_condition"] or "").strip() if "chronic_condition" in p.keys() else ""
+    if cc and cc != "无" and not cc.startswith("严重疾病"):
+        lines.append(f"【慢性病档案】用户登记有：{cc}。硬要求：运动安排最多散步/拉伸级；"
+                     f"绝不出现任何血压/血糖数值；饮食按公开指南的慢病原则清淡保守安排。")
+        if p["doctor_advice"]:
+            lines.append(f"【医嘱】（硬约束，优先级高于一切手册建议）：{p['doctor_advice']}")
+
     # 【安全状态】注入（V2 文档 3.5）：让模型第一时间就不朝错误方向写；none 时不加行
     if safety_state:
         safety_line = safety.context_line(safety_state)
@@ -286,6 +296,13 @@ def run_agent(user_id: int, username: str, baseline_level: int = 3,
     trace["safety"] = {"等级": safety_state["final_level"], "类别": safety_state.get("category"),
                        "L1命中": safety_state.get("hits", []), "L2": safety_state.get("l2"),
                        "L3改写": rewrites}
+
+    # 慢性病固定尾注（V2 文档 4.3 镣铐三：后端拼接，不指望模型）；crisis 整卡替换时不加
+    if safety_state.get("chronic_managed") and advice.get("safety_level") != "crisis":
+        p = db.get_profile(user_id)
+        has_advice = bool(p and "doctor_advice" in p.keys() and p["doctor_advice"])
+        advice["disclaimer"] = (safety.CHRONIC_DISCLAIMER_WITH_ADVICE if has_advice
+                                else safety.CHRONIC_DISCLAIMER)
 
     if notes:
         advice["agent_notes"] = notes

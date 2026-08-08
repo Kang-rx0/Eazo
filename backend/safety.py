@@ -232,7 +232,8 @@ def safety_classify(text: str, l1_result: dict) -> dict | None:
         return None
 
 
-def assess(texts: list[str], health_note: str | None = None) -> dict:
+def assess(texts: list[str], health_note: str | None = None,
+           chronic_condition: str | None = None) -> dict:
     """输入侧检测总入口：把一批用户文本（当天自由输入、纠正项等）合并扫描，产出 safety_state。
 
     流程（V2 三层架构的输入侧）：L1 词表扫描 → L2 分类器裁决 → merge 合并。
@@ -240,18 +241,37 @@ def assess(texts: list[str], health_note: str | None = None) -> dict:
     省一次调用；其余情况都过 L2，既裁决软词候选（否定式降级），也兜住词表漏掉的
     说法（"撑不住了"类，L2 可加严）。L2 失败 → merge 自动退回 L1 保守结果。
 
-    health_note（档案健康备注，V2 文档 3.4）：只提取其中的慢性病词并入扫描——
-    这样"备注写了高血压 + 今晚输入想出汗"能跨来源触发组合规则；急性软词不取
-    （"腰不好容易疼"描述的是长期状态，不是今晚的急性信号，进不了红黄档）。
-    备注里的严重疾病词在 S4 的劝退流程里处理，这里不掺入。
+    档案侧慢性病（health_note 中的慢性病词 + 结构化病况 chronic_condition）走
+    S4 确认的两档规则：
+    - 今晚文本带强度意图（出汗/跑/撸铁，或笼统的"运动/锻炼"按保守算强度）→ 档案病名
+      并入扫描，组合规则锁 caution（跨来源拦截）；
+    - 意图全部是温和档（散步/拉伸/动一动）或没提运动 → 不锁，走"四镣铐"路径
+      （chronic_managed=True：档位封顶、散步级建议、固定尾注由外层执行）。
+    聊天文本里新自述的慢性病不适用两档——当晚病情未验证，一律维持组合锁（用例 4）。
+    health_note 的急性软词不取（"腰不好容易疼"是长期状态，不是今晚的急性信号）；
+    严重疾病词在劝退流程处理（onboarding 派生 severe_flag / 自由输入 mark_severe）。
     safety_state 是贯穿主流程的安全上下文，enforce/trace/日志都吃它。
     """
     user_joined = "\n".join(t for t in texts if t and t.strip())
-    hn_chronic = _contains_any(health_note or "", rules.CHRONIC_WORDS)
+
+    # 档案侧慢性病清单：健康备注词 + 结构化病况（"严重疾病：…"不在这里，走劝退）
+    profile_chronic = _contains_any(health_note or "", rules.CHRONIC_WORDS)
+    cc = (chronic_condition or "").strip()
+    if cc and cc != "无" and not cc.startswith("严重疾病"):
+        matched = _contains_any(cc, rules.CHRONIC_WORDS)
+        # "其他慢性病：甲减"这类词表没有的，用冒号后的说明当病名
+        for w in (matched or [cc.split("：")[-1].split(":")[-1]]):
+            if w not in profile_chronic:
+                profile_chronic.append(w)
+
+    intent_words = _contains_any(user_joined, rules.EXERCISE_INTENT_WORDS)
+    gentle_only = bool(intent_words) and all(
+        w in rules.GENTLE_INTENT_WORDS for w in intent_words)
     scan_joined = user_joined
-    if hn_chronic:
-        scan_joined = (user_joined + "\n" if user_joined else "") \
-            + "（档案健康备注提及：" + "、".join(hn_chronic) + "）"
+    if profile_chronic and intent_words and not gentle_only:
+        # 强度意图 → 档案病名并入扫描，让组合规则跨来源触发
+        scan_joined = user_joined + "\n（档案慢性病：" + "、".join(profile_chronic) + "）"
+
     l1 = l1_scan(scan_joined)
     l2 = None
     if user_joined and l1["locked_level"] not in ("danger", "crisis"):
@@ -269,7 +289,10 @@ def assess(texts: list[str], health_note: str | None = None) -> dict:
 
     return {"final_level": final, "category": category,
             "categories": categories, "hits": l1["hits"],
-            "chronic_words": l1["chronic_words"], "l1": l1, "l2": l2}
+            "chronic_words": l1["chronic_words"] or profile_chronic,
+            "chronic_profile": profile_chronic,      # 档案侧慢性病（四镣铐路径的开关）
+            "chronic_managed": bool(profile_chronic),
+            "l1": l1, "l2": l2}
 
 
 def context_line(safety_state: dict) -> str | None:
@@ -282,12 +305,15 @@ def context_line(safety_state: dict) -> str | None:
     level = safety_state["final_level"]
     if level == "none":
         return None
+    # 结尾统一提醒：这是内部状态行，模型不得把"安全状态/L1/L2/判定"复述进用户文案
+    tail = ("（本行是系统内部状态，输出文案里不要出现'安全状态''L1/L2''判定''禁止'"
+            "这类字样，理由请用用户能懂的话直接说）")
     if level == "crisis":
         return ("【安全状态】L1/L2 判定为 crisis（心理危机）：不要给出任何常规建议，"
-                "只输出休息与关怀性的内容，不评判、不说教。")
+                "只输出休息与关怀性的内容，不评判、不说教。" + tail)
     if level == "danger":
         return ("【安全状态】L1/L2 判定为 danger（急性危险信号）：不要给出任何饮食或"
-                "运动安排，judgement 只写休息；就医提醒系统会在你之外补充。")
+                "运动安排，judgement 只写休息；就医提醒系统会在你之外补充。" + tail)
     # caution：按类别拼具体指令
     cats = safety_state.get("categories") or []
     parts = []
@@ -305,6 +331,10 @@ def context_line(safety_state: dict) -> str | None:
               "理由请用用户能懂的话直接说）")
 
 
+# 输出里不允许出现的内部术语（注入行要求模型别复述，挡不死时由 enforce 代码兜底删句）
+_INTERNAL_JARGON_WORDS = ("安全状态", "L1", "L2", "判定为", "禁止安排")
+
+
 # ---- L3 固定话术（V2 文档五；后端拼接，永不指望模型写）----
 # 危机文案：用户 2026-08-08 确认——不提供任何求助热线，只建议就医/咨询专业医生
 CRISIS_JUDGEMENT = "听起来你现在很难受。今晚不用做任何事，好好休息。"
@@ -317,6 +347,17 @@ SEE_DOCTOR_CHRONIC = "涉及{disease}的运动安排，请先咨询医生，今�
 SEE_DOCTOR_CHRONIC_GENERIC = "运动方案请先咨询医生，今晚先以休息为主。"
 MEDICATION_NOTE = "用药相关的问题，请咨询医生或药师。"
 REST_JUDGEMENT = "今晚先照顾好自己，好好休息。"
+
+# ---- S4 慢性病人群固定文案（后端拼接）----
+# 严重疾病劝退（V2 文档 4.4 文案示例，语气抱歉而非拒斥；【待用户逐字确认】）
+SEVERE_NOTICE = ("你的情况需要比我们更专业的照顾。这个产品没法为你提供足够安全的建议，"
+                 "请以医生的指导为准。")
+# 慢性病无医嘱尾注（V2 文档 4.3，原文照录）
+CHRONIC_DISCLAIMER = ("以上是基于公开指南的一般建议，不能替代医嘱；"
+                      "如有医嘱请以医嘱为准，可在『我的资料』里补填。")
+# 慢性病有医嘱尾注（【待用户逐字确认】）
+CHRONIC_DISCLAIMER_WITH_ADVICE = ("以上安排参考了你填写的医嘱；具体执行请以医生意见为准，"
+                                  "医嘱有变化记得更新『我的资料』。")
 
 AVOID_DANGER = ["任何运动或体力活动", "熬夜硬撑"]
 AVOID_CHRONIC = ["未经医生评估的运动"]
@@ -462,6 +503,17 @@ def enforce(advice: dict, safety_state: dict, tools_called: list[str]) -> tuple[
                                            keep_placeholder="具体情况请就医判断。")
         rewrites.append(f"诊断断言过滤：{field} 替换断言句 {dropped}")
         advice[field] = new_val
+
+    # ---- 4. 内部术语清除（所有等级都跑）----
+    # 模型偶尔会把注入的【安全状态】行当作"今天已知条件"复述进理由，逐句删掉
+    for field in _TEXT_FIELDS:
+        val = advice.get(field)
+        if not isinstance(val, str) or not any(w in val for w in _INTERNAL_JARGON_WORDS):
+            continue
+        new_val, dropped = _drop_sentences(
+            val, lambda s: any(w in s for w in _INTERNAL_JARGON_WORDS))
+        rewrites.append(f"内部术语清除：{field} 删除 {dropped}")
+        advice[field] = new_val or (REST_JUDGEMENT if field == "judgement" else None)
 
     if rewrites:
         logger.warning("安全L3改写 level=%s 改写=%s", level, rewrites)

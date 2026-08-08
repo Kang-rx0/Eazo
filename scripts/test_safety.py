@@ -460,12 +460,13 @@ class TestS3ContextAndHealthNote(unittest.TestCase):
         self.assertIn("高血压", state["chronic_words"])
 
     def test_健康备注慢性病_无文本不调L2不惊扰(self):
-        # 只有备注、今晚没说任何话 → 不调 L2（省调用），等级 none（慢性病提及不惊扰）
+        # 只有备注、今晚没说任何话 → 不调 L2（省调用），等级 none，走四镣铐管理路径
         with patch("backend.safety.llm.chat") as mock_chat:
             state = assess([], health_note="有高血压")
         mock_chat.assert_not_called()
         self.assertEqual(state["final_level"], "none")
-        self.assertIn("chronic_mention", state["categories"])
+        self.assertTrue(state["chronic_managed"])
+        self.assertEqual(state["chronic_profile"], ["高血压"])
 
     def test_健康备注急性软词不算今晚信号(self):
         # 备注"腰不好，久坐容易疼"描述长期状态，"疼"不得作为今晚的急性候选
@@ -481,6 +482,57 @@ class TestS3ContextAndHealthNote(unittest.TestCase):
                 '{"level":"none","category":"none","reason":"正常"}')):
             state = assess(["中午吃了黄焖鸡"], health_note="有心脏病")
         self.assertEqual(state["final_level"], "none")
+
+
+class TestS4ChronicTwoTier(unittest.TestCase):
+    """S4：慢性病两档规则（2026-08-08 与用户确认）+ 结构化病况解析。"""
+
+    _L2_NONE = '{"level":"none","category":"none","reason":"正常"}'
+
+    def test_档案慢性病_温和意图_不锁走四镣铐(self):
+        # 档案登记高血压 + 今晚只说想散散步 → 不锁 caution，chronic_managed 放行温和档
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(self._L2_NONE)):
+            state = assess(["今晚想散散步"], chronic_condition="高血压")
+        self.assertEqual(state["final_level"], "none")
+        self.assertNotIn("chronic_exercise", state["categories"])
+        self.assertTrue(state["chronic_managed"])
+
+    def test_档案慢性病_强度意图_仍锁caution(self):
+        # 档案登记高血压 + 想出汗 → 病名并入扫描，组合锁 caution（L2 说 none 也压不动）
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(self._L2_NONE)):
+            state = assess(["今晚想多动一动出出汗"], chronic_condition="高血压")
+        self.assertEqual(state["final_level"], "caution")
+        self.assertIn("chronic_exercise", state["categories"])
+
+    def test_档案慢性病_笼统运动词按强度算(self):
+        # "想去运动"没说强度 → 保守按强度档拦（宁可误报）
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(self._L2_NONE)):
+            state = assess(["今晚想去运动"], chronic_condition="2型糖尿病")
+        self.assertEqual(state["final_level"], "caution")
+
+    def test_文本新自述慢性病_温和意图也拦(self):
+        # 聊天里新自述的慢性病不适用两档：当晚病情未验证，维持组合锁（用例 4 不回归）
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(self._L2_NONE)):
+            state = assess(["我有糖尿病，今晚想在家动一动"])
+        self.assertEqual(state["final_level"], "caution")
+        self.assertIn("chronic_exercise", state["categories"])
+
+    def test_结构化病况解析(self):
+        with patch("backend.safety.llm.chat") as m:
+            self.assertEqual(assess([], chronic_condition="2型糖尿病")["chronic_profile"],
+                             ["糖尿病"])          # 词表子串命中
+            self.assertEqual(assess([], chronic_condition="其他慢性病：甲状腺功能减退")
+                             ["chronic_profile"], ["甲状腺功能减退"])  # 冒号后说明当病名
+            self.assertEqual(assess([], chronic_condition="严重疾病：心肌梗死史")
+                             ["chronic_profile"], [])   # 严重疾病走劝退，不入慢病管理
+            self.assertEqual(assess([], chronic_condition="无")["chronic_profile"], [])
+            m.assert_not_called()
+
+    def test_慢性病尾注常量无占位符(self):
+        for text in (safety.SEVERE_NOTICE, safety.CHRONIC_DISCLAIMER,
+                     safety.CHRONIC_DISCLAIMER_WITH_ADVICE):
+            self.assertNotIn("{{", text)
+            self.assertNotIn("热线", text)   # 用户确认：不提供任何求助热线
 
 
 if __name__ == "__main__":

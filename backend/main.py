@@ -172,20 +172,37 @@ def _run_and_save_today(user_id: int, username: str, record=None,
         level = record["baseline_level"] if record["baseline_level"] is not None else 3
         conditions = json.loads(record["conditions_json"] or "{}")
 
-    # 输入侧安全检测（V2 三层架构入口）：当天全部自由输入 + 纠正项 + 档案健康备注。
+    # 输入侧安全检测（V2 三层架构入口）：当天全部自由输入 + 纠正项 + 档案（健康备注/结构化病况）。
     # 当天说过的危险信号对当晚整晚有效——之后不管因为什么重新生成建议，都带着这个等级。
-    # 健康备注只取慢性病词（"备注写了高血压 + 今晚想出汗"跨来源触发组合规则）。
     texts = db.get_free_inputs(user_id, clock.today()) + list(conditions.get("纠正", []))
     profile = db.get_profile(user_id)
-    safety_state = safety.assess(texts, health_note=profile["health_note"] if profile else None)
+    safety_state = safety.assess(
+        texts,
+        health_note=profile["health_note"] if profile else None,
+        chronic_condition=profile["chronic_condition"] if profile else None,
+    )
     if safety_state["final_level"] != "none" or safety_state["hits"]:
         conditions["安全"] = {"level": safety_state["final_level"],
                               "命中": safety_state["hits"], "L2": safety_state["l2"]}
+
+    # 慢性病档位封顶（V2 文档 4.3 镣铐二）：baseline 上限 3（正常人 4）
+    if safety_state["chronic_managed"] and level > 3:
+        logger.info("user=%s 慢性病档位封顶：%s→3", username, level)
+        level = 3
+        conditions["档位"] = 3
 
     advice, _trace = agent.run_agent(user_id, username, baseline_level=level,
                                      extra_conditions=extra_conditions,
                                      safety_state=safety_state)
     conditions["agent_notes"] = advice.get("agent_notes", [])
+
+    # 严重疾病劝退入口之二（V2 文档 4.4）：自由输入/纠正里自述严重疾病 →
+    # 当晚已按 danger 出安全模式建议，这里写入档案（后续 /api/state 转 rejected 视图）
+    if "severe" in safety_state["categories"] and profile is not None:
+        severe_words = [h.split("(")[0] for h in safety_state["hits"] if "严重疾病" in h]
+        db.mark_severe(user_id, f"用户自述（{'、'.join(severe_words)}）")
+        advice["severe_notice"] = safety.SEVERE_NOTICE
+        logger.warning("user=%s 自由输入命中严重疾病词 %s，已标记劝退", username, severe_words)
     if record is None:
         db.insert_daily_record(
             user_id, clock.today(),
@@ -208,8 +225,12 @@ async def api_offwork(request: Request):
     user_id = _current_user_id(request)
     if user_id is None:
         return JSONResponse(status_code=401, content={"error": "未登录"})
-    if db.get_profile(user_id) is None:
+    profile = db.get_profile(user_id)
+    if profile is None:
         return JSONResponse(status_code=400, content={"error": "请先完成 onboarding"})
+    if profile["severe_flag"]:
+        # 严重疾病劝退（V2 文档 4.4）：所有建议生成接口拒绝执行
+        return {"rejected": True, "message": safety.SEVERE_NOTICE}
     username = db.get_username(user_id)
     today = clock.today()
 
@@ -296,6 +317,9 @@ async def api_correct(payload: dict, request: Request):
     ctype = payload.get("type")
     if ctype not in CORRECT_TYPES:
         return JSONResponse(status_code=400, content={"error": f"type 需为 {CORRECT_TYPES} 之一"})
+    p = db.get_profile(user_id)
+    if p is not None and p["severe_flag"]:
+        return {"rejected": True, "message": safety.SEVERE_NOTICE}
     record = db.get_daily_record(user_id, clock.today())
     if record is None or not record["advice_json"]:
         return JSONResponse(status_code=400, content={"error": "今天还没有建议，先点「下班了」"})
@@ -342,6 +366,9 @@ async def api_free_input(payload: dict, request: Request):
     text = str(payload.get("text", "")).strip()
     if not text:
         return JSONResponse(status_code=400, content={"error": "内容不能为空"})
+    p = db.get_profile(user_id)
+    if p is not None and p["severe_flag"]:
+        return {"rejected": True, "message": safety.SEVERE_NOTICE}
     username = db.get_username(user_id)
     fid = db.insert_free_input(user_id, clock.today(), clock.now().strftime("%H:%M"), text)
     logger.info("user=%s event=free_input text=%s", username, text[:50])
@@ -545,7 +572,13 @@ async def api_state(request: Request):
         return JSONResponse(status_code=401, content={"error": "未登录"})
     pending_feedback = None
     yesterday_feedback = None
-    if db.get_profile(user_id) is None:
+    state_profile = db.get_profile(user_id)
+    if state_profile is not None and state_profile["severe_flag"]:
+        # 严重疾病劝退视图（V2 文档 4.4）：语气抱歉而非拒斥；可去「我的资料」修改（误报纠正通道）
+        return {"view": "rejected", "message": safety.SEVERE_NOTICE,
+                "virtual_now": clock.now().isoformat(),
+                "virtual_now_display": clock.now_display(), "vday": clock.today()}
+    if state_profile is None:
         view = "onboarding"
         today_advice = None
     else:

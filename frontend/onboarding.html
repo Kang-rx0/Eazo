@@ -84,6 +84,30 @@
     <input id="health_note" placeholder="比如：腰不好 / 胃不太好" size="40">
   </fieldset>
 
+  <!-- V2 安全边界（S4）：结构化病况 + 医嘱 -->
+  <fieldset>
+    <legend>有确诊的慢性病吗？</legend>
+    <label><input type="radio" name="chronic" value="无" checked onchange="chronicChanged()"> 无</label>
+    <label><input type="radio" name="chronic" value="高血压" onchange="chronicChanged()"> 高血压</label>
+    <label><input type="radio" name="chronic" value="2型糖尿病" onchange="chronicChanged()"> 2型糖尿病</label>
+    <label><input type="radio" name="chronic" value="其他" onchange="chronicChanged()"> 其他慢性病</label>
+    <label><input type="radio" name="chronic" value="严重" onchange="chronicChanged()"> 下列较重的情况</label>
+    <div id="chronic-other-wrap" style="display:none; margin-top:6px;">
+      说明一下：<input id="chronic_other" size="20" placeholder="如：甲状腺功能减退">
+    </div>
+    <div id="severe-wrap" style="display:none; margin-top:6px;">
+      <select id="severe_select">
+        <option>心脏病</option><option>心肌梗死史</option><option>中风/脑梗史</option>
+        <option>恶性肿瘤治疗中</option><option>肾功能衰竭</option>
+        <option>装有心脏起搏器</option><option>孕产期</option>
+      </select>
+    </div>
+    <div id="doctor-advice-wrap" style="display:none; margin-top:6px;">
+      医生对你的饮食/运动有过嘱咐吗？填了我们会严格照着来。（可跳过）<br>
+      <textarea id="doctor_advice" rows="3" cols="46" placeholder="比如：晚餐主食减半，不做剧烈运动，饭后可散步"></textarea>
+    </div>
+  </fieldset>
+
   <fieldset>
     <legend>运动基础</legend>
     <select id="exercise_base">
@@ -124,6 +148,27 @@
       return document.querySelector(`input[name="${name}"]:checked`).value;
     }
 
+    // 病况单选联动：其他→说明框；严重→清单；慢性病（非无非严重）→医嘱框
+    function chronicChanged() {
+      const v = radioValue('chronic');
+      document.getElementById('chronic-other-wrap').style.display = v === '其他' ? 'block' : 'none';
+      document.getElementById('severe-wrap').style.display = v === '严重' ? 'block' : 'none';
+      document.getElementById('doctor-advice-wrap').style.display =
+        (v === '无' || v === '严重') ? 'none' : 'block';
+    }
+
+    // 组装 chronic_condition 字段值（与后端约定的格式）
+    function chronicValue() {
+      const v = radioValue('chronic');
+      if (v === '无') return null;
+      if (v === '其他') {
+        const note = document.getElementById('chronic_other').value.trim();
+        return note ? `其他慢性病：${note}` : '其他慢性病';
+      }
+      if (v === '严重') return `严重疾病：${document.getElementById('severe_select').value}`;
+      return v;   // 高血压 / 2型糖尿病
+    }
+
     // 编辑模式：用现有档案预填表单
     async function prefill() {
       const res = await fetch('/api/profile', { headers: { 'Authorization': 'Bearer ' + token } });
@@ -148,6 +193,24 @@
       for (const el of document.querySelectorAll('input[name="diet"]')) {
         el.checked = diets.includes(el.value);
       }
+      // 病况预填：把存储值拆回单选 + 附加框
+      const cc = p.chronic_condition || '';
+      let radio = '无';
+      if (cc.startsWith('严重疾病')) {
+        radio = '严重';
+        const item = cc.split('：')[1] || '';
+        const sel = document.getElementById('severe_select');
+        if ([...sel.options].some(o => o.value === item)) sel.value = item;
+      } else if (cc.startsWith('其他慢性病')) {
+        radio = '其他';
+        document.getElementById('chronic_other').value = cc.split('：')[1] || '';
+      } else if (cc) {
+        radio = cc;   // 高血压 / 2型糖尿病
+      }
+      const el = document.querySelector(`input[name="chronic"][value="${radio}"]`);
+      if (el) el.checked = true;
+      setVal('doctor_advice', p.doctor_advice || '');
+      chronicChanged();
     }
 
     async function submitOnboarding() {
@@ -170,6 +233,8 @@
         age: num('age'),
         height_cm: num('height_cm'),
         weight_kg: num('weight_kg'),
+        chronic_condition: chronicValue(),
+        doctor_advice: document.getElementById('doctor_advice').value.trim() || null,
       };
       // 只保存档案（首夜建议由用户在主界面点「下班了」触发）
       document.getElementById('submit-btn').disabled = true;
