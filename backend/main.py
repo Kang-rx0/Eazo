@@ -118,6 +118,10 @@ async def api_onboarding(payload: dict, request: Request):
     if user_id is None:
         return JSONResponse(status_code=401, content={"error": "未登录"})
     is_update = db.get_profile(user_id) is not None
+    # V3 B5 追记：口味偏好写入端归一化（旧名→新名），库里只积累新名
+    if isinstance(payload.get("favorite_foods"), str) and payload["favorite_foods"]:
+        payload = dict(payload)
+        payload["favorite_foods"] = agent.normalize_favorite_foods(payload["favorite_foods"])
     db.upsert_profile(user_id, payload)
     username = db.get_username(user_id)
     if is_update:

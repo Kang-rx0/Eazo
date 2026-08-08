@@ -796,6 +796,14 @@ class TestFavoriteFoodsB5(unittest.TestCase):
         self.assertEqual(self.tips("兰州拉面,粉面"), [f"粉面（{self.strategies['粉面']}）"])
         self.assertEqual(self.tips(""), [])
 
+    def test_写入端归一化(self):
+        # V3 B5 追记：存库前旧名→新名；未知名原样保留不丢；空串安全
+        from backend.agent import normalize_favorite_foods as norm
+        self.assertEqual(norm("粉面类,甜品奶茶,家常菜"), "粉面,甜品饮料,自己做的家常")
+        self.assertEqual(norm("火锅麻辣烫,甜品奶茶"), "火锅麻辣烫,甜品饮料")
+        self.assertEqual(norm("粉面,兰州拉面"), "粉面,兰州拉面")
+        self.assertEqual(norm(""), "")
+
 
 class TestConfirmHintB1(unittest.TestCase):
     """V3 B1：/api/state confirm_hint 的纯函数估算（agent.build_confirm_hint）。

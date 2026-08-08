@@ -72,6 +72,13 @@ FAVORITE_FOOD_STRATEGIES = {
 FAVORITE_FOOD_ALIASES = {"粉面类": "粉面", "甜品奶茶": "甜品饮料", "家常菜": "自己做的家常"}
 
 
+def normalize_favorite_foods(fav: str) -> str:
+    """写入端归一化（V3 B5 追记）：存库前把旧名统一成新名，库里从此只积累新名。
+    未知名原样保留（白名单校验在前端，后端不丢用户数据）；读取端归一化仍保留兜底。"""
+    cats = [c.strip() for c in (fav or "").split(",") if c.strip()]
+    return ",".join(FAVORITE_FOOD_ALIASES.get(c, c) for c in cats)
+
+
 def favorite_food_tips(fav: str) -> list[str]:
     """把档案里逗号分隔的口味偏好转成"类别（最轻的改法）"清单；旧名先归一化，未知名忽略。"""
     cats = [FAVORITE_FOOD_ALIASES.get(c.strip(), c.strip()) for c in (fav or "").split(",")]
