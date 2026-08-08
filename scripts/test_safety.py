@@ -286,6 +286,14 @@ class TestEnforceL3(unittest.TestCase):
         self.assertNotIn("7.8", out["reason"])
         self.assertTrue(any("血压血糖" in r for r in rewrites))
 
+    def test_数字校验_删除后不留空括号(self):
+        # "少油（<5g）"删掉 5g 后不能留下"（<）"（meal 多餐实测时发现的残缺）
+        out, _ = enforce(self._advice(eat="清炒绿叶菜，不加糖、少油（<5g），杂粮饭半碗"),
+                         assess([]), [])
+        self.assertNotIn("5g", out["eat"])
+        self.assertNotIn("（<）", out["eat"])
+        self.assertIn("少油", out["eat"])
+
     def test_数字校验_文献名年份不误删(self):
         # 《成人高血压食养指南(2023)》的"血压…2023"不是血压值（S7 回归发现的误删隐患）
         out, rewrites = enforce(

@@ -364,14 +364,14 @@ SEE_DOCTOR_CHRONIC_GENERIC = "运动方案请先咨询医生，今晚先以休�
 MEDICATION_NOTE = "用药相关的问题，请咨询医生或药师。"
 REST_JUDGEMENT = "今晚先照顾好自己，好好休息。"
 
-# ---- S4 慢性病人群固定文案（后端拼接）----
-# 严重疾病劝退（V2 文档 4.4 文案示例，语气抱歉而非拒斥；【待用户逐字确认】）
+# ---- S4 慢性病人群固定文案（后端拼接；2026-08-08 用户已逐条确认定稿）----
+# 严重疾病劝退（V2 文档 4.4，语气抱歉而非拒斥）
 SEVERE_NOTICE = ("你的情况需要比我们更专业的照顾。这个产品没法为你提供足够安全的建议，"
                  "请以医生的指导为准。")
-# 慢性病无医嘱尾注（V2 文档 4.3，原文照录）
+# 慢性病无医嘱尾注（V2 文档 4.3 原文）
 CHRONIC_DISCLAIMER = ("以上是基于公开指南的一般建议，不能替代医嘱；"
                       "如有医嘱请以医嘱为准，可在『我的资料』里补填。")
-# 慢性病有医嘱尾注（【待用户逐字确认】）
+# 慢性病有医嘱尾注
 CHRONIC_DISCLAIMER_WITH_ADVICE = ("以上安排参考了你填写的医嘱；具体执行请以医生意见为准，"
                                   "医嘱有变化记得更新『我的资料』。")
 
@@ -432,7 +432,10 @@ def _strip_field_numbers(advice: dict, regex: re.Pattern, why: str, rewrites: li
             continue
         matches = regex.findall(val)
         if matches:
-            advice[field] = regex.sub("", val).strip("，、 ")
+            new_val = regex.sub("", val)
+            # 清理删除后残留的空括号/悬空比较符："少油（<5g）"删掉 5g 后别留下"（<）"
+            new_val = re.sub(r"[（(]\s*[<>≤≥约≈~]*\s*[)）]", "", new_val)
+            advice[field] = new_val.strip("，、 ")
             rewrites.append(f"{why}：{field} 删除数字短语 {matches}")
 
 
