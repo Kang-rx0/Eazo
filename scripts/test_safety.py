@@ -302,6 +302,53 @@ class TestEnforceL3(unittest.TestCase):
         self.assertIn("2023", out["reason"])
         self.assertEqual([r for r in rewrites if "血压血糖" in r], [])
 
+    # ---- V3 P0：血压/血糖数字"像读数才删"（队友反馈的误伤修复）----
+
+    def _assert_untouched(self, sentence):
+        """误伤句必须零改写：原句一字不动、无血压血糖类改写记录。"""
+        out, rewrites = enforce(self._advice(reason=sentence),
+                                assess([]), ["calc_body_metrics"])
+        self.assertEqual(out["reason"], sentence)
+        self.assertEqual([r for r in rewrites if "血压血糖" in r], [])
+
+    def test_数字校验_P0误伤_时长不删(self):
+        # 曾被删成"量完分钟"："血压再走10"命中旧第二分支
+        self._assert_untouched("量完血压再走10分钟")
+
+    def test_数字校验_P0误伤_时刻不删(self):
+        # 曾被删成"高点后不建议剧烈运动"／"睡前测个:30 上床"
+        self._assert_untouched("高血压人群晚上8点后不建议剧烈运动")
+        self._assert_untouched("睡前测个血压 22:30 上床")
+
+    def test_数字校验_P0误伤_版年不删(self):
+        # 不带括号书名号的文献名：曾被删成"成人高版"
+        self._assert_untouched("成人高血压食养指南2023版建议清淡饮食")
+
+    def test_数字校验_P0读数形态仍删(self):
+        # 140/90 是血压读数形态，无单位也必须删
+        out, rewrites = enforce(self._advice(reason="血压140/90"),
+                                assess([]), ["calc_body_metrics"])
+        self.assertNotIn("140", out["reason"])
+        self.assertTrue(any("血压血糖" in r for r in rewrites))
+
+    def test_数字校验_P0语境词仍删(self):
+        # 取值语境词（控制在/不超过…）+ 数字必须删（现有单测句拆开各验一遍）
+        out, rewrites = enforce(self._advice(reason="把血压控制在140/90mmHg以内"),
+                                assess([]), ["calc_body_metrics"])
+        self.assertNotIn("140", out["reason"])
+        self.assertTrue(any("血压血糖" in r for r in rewrites))
+        out2, rewrites2 = enforce(self._advice(reason="血糖不超过7.8"),
+                                  assess([]), ["calc_body_metrics"])
+        self.assertNotIn("7.8", out2["reason"])
+        self.assertTrue(any("血压血糖" in r for r in rewrites2))
+
+    def test_数字校验_P0血糖紧邻小数仍删(self):
+        # "血糖7.8"：紧邻（≤2字）小数是读数
+        out, rewrites = enforce(self._advice(reason="血糖7.8"),
+                                assess([]), ["calc_body_metrics"])
+        self.assertNotIn("7.8", out["reason"])
+        self.assertTrue(any("血压血糖" in r for r in rewrites))
+
     def test_诊断断言过滤(self):
         # 基线用例 6 的目标行为：不出现疾病断言（"可能是心脏病"）
         out, rewrites = enforce(
