@@ -71,6 +71,19 @@
     <label><input type="checkbox" name="diet" value="不吃牛羊肉"> 不吃牛羊肉</label>
   </fieldset>
 
+  <!-- V2：爱吃的食物类别（软参考——顺着爱好给"最轻的改法"，不没收爱好） -->
+  <fieldset>
+    <legend>平时爱吃什么？（可多选，可跳过——我们不没收爱好，只帮你吃得舒服点）</legend>
+    <label><input type="checkbox" name="fav" value="粉面类"> 粉面类（螺蛳粉/拌粉/汤面）</label>
+    <label><input type="checkbox" name="fav" value="炸物快餐"> 炸物快餐（炸鸡/汉堡/薯条）</label>
+    <label><input type="checkbox" name="fav" value="盖饭便当"> 盖饭/便当/米饭类</label><br>
+    <label><input type="checkbox" name="fav" value="火锅麻辣烫"> 火锅/麻辣烫/串</label>
+    <label><input type="checkbox" name="fav" value="烧烤夜宵"> 烧烤/夜宵</label>
+    <label><input type="checkbox" name="fav" value="甜品奶茶"> 甜品/奶茶/饮料</label><br>
+    <label><input type="checkbox" name="fav" value="轻食沙拉"> 轻食/沙拉</label>
+    <label><input type="checkbox" name="fav" value="家常菜"> 自己做的家常菜</label>
+  </fieldset>
+
   <fieldset>
     <legend>平时几点起床？（用来倒推今晚几点该停）</legend>
     <select id="wake_time">
@@ -165,6 +178,10 @@
       for (const el of document.querySelectorAll('input[name="diet"]')) {
         el.checked = diets.includes(el.value);
       }
+      const favs = (p.favorite_foods || '').split(',');
+      for (const el of document.querySelectorAll('input[name="fav"]')) {
+        el.checked = favs.includes(el.value);
+      }
       // 病况预填：原文回显（旧格式"严重疾病：xxx"去掉前缀，只显示 xxx）
       const cc = p.chronic_condition || '';
       setVal('chronic_condition', cc.startsWith('严重疾病：') ? cc.slice(5) : cc);
@@ -194,6 +211,8 @@
         weight_kg: num('weight_kg'),
         chronic_condition: document.getElementById('chronic_condition').value.trim() || null,
         doctor_advice: document.getElementById('doctor_advice').value.trim() || null,
+        favorite_foods: [...document.querySelectorAll('input[name="fav"]:checked')]
+          .map(el => el.value).join(',') || null,
       };
       // 只保存档案（首夜建议由用户在主界面点「下班了」触发）
       document.getElementById('submit-btn').disabled = true;

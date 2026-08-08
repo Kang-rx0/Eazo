@@ -31,9 +31,28 @@
 
   <h1>今晚</h1>
 
+  <!-- V2：下班提醒条（到设定下班点弹出；「还没」半小时后再问一次，再没有就不问了） -->
+  <div id="offwork-reminder" style="display:none; padding:8px 12px; background:#fff8e6; border:1px solid #e6d9a8; margin-bottom:12px;">
+    到点了，下班了吗？
+    <button onclick="reminderYes()">下班了</button>
+    <button onclick="reminderNo()">还没</button>
+  </div>
+
   <!-- home 视图：大按钮「下班了」（文档 3.2） -->
   <div id="home-view" style="display:none;">
     <p><button id="offwork-btn" onclick="offwork()">下班了</button></p>
+  </div>
+
+  <!-- V2：生成前先问一句今晚状态（选完再生成；语义与一击纠正一致） -->
+  <div id="state-view" style="display:none;" class="card">
+    <h2>今晚状态怎么样？</h2>
+    <div class="small-btns">
+      <button onclick="pickState('今天还行')">今天还行</button>
+      <button onclick="pickState('今晚更累')">今晚更累</button>
+      <button onclick="pickState('时间更少')">时间更少</button>
+      <button onclick="pickState('不太舒服')">不太舒服</button>
+    </div>
+    <p style="font-size:12px;"><a href="javascript:void(0)" onclick="pickState(null)">跳过，直接生成</a></p>
   </div>
 
   <!-- 回执视图：第二天点「下班了」先收昨晚回执（文档 7.2） -->
@@ -89,6 +108,12 @@
       <button onclick="correct('今天还行')">今天还行</button>
       <button onclick="correct('其实我做了')">其实我做了</button>
     </div>
+    <!-- V2：难度微调（安全模式下不显示「加一点」——运动本来就被撤了） -->
+    <div class="small-btns" style="margin-top:4px;">
+      难度：
+      <button onclick="correct('难度再低一点')">再轻一点</button>
+      <button id="harder-btn" onclick="correct('难度再高一点')">再加一点</button>
+    </div>
   </div>
 
   <!-- V2 S4：严重疾病温和劝退视图（语气抱歉而非拒斥，保留改资料的出口） -->
@@ -130,12 +155,12 @@
     const AUTH = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
 
     function show(viewId) {
-      for (const id of ['home-view', 'feedback-view', 'advice-view', 'rejected-view']) {
+      for (const id of ['home-view', 'feedback-view', 'advice-view', 'rejected-view', 'state-view']) {
         document.getElementById(id).style.display = id === viewId ? 'block' : 'none';
       }
-      // 自由输入框在 home / advice 视图都可用，回执与劝退视图收起
+      // 自由输入框在 home / advice 视图都可用，回执/状态/劝退视图收起
       document.getElementById('input-bar').style.display =
-        (viewId === 'feedback-view' || viewId === 'rejected-view') ? 'none' : 'block';
+        (viewId === 'home-view' || viewId === 'advice-view') ? 'block' : 'none';
     }
 
     function setLoading(on) {
@@ -180,10 +205,12 @@
     }
 
     // 开屏先问后端该显示什么（文档 7.1）
+    let lastState = null;
     async function refreshState() {
       const res = await fetch('/api/state', { headers: AUTH });
       if (res.status === 401) { localStorage.removeItem('token'); location.href = 'auth.html'; return; }
       const state = await res.json();
+      lastState = state;
       if (state.view === 'onboarding') { location.href = 'onboarding.html'; return; }
       document.getElementById('clock-display').textContent = state.virtual_now_display;
       if (state.view === 'rejected') {
@@ -194,16 +221,86 @@
       renderYesterdayLine(state.yesterday_feedback);
       if (state.view === 'advice') { renderAdvice(state.today_advice); show('advice-view'); }
       else show('home-view');
+      checkOffworkReminder(state);
     }
 
-    // 「下班了」：可能先要收昨晚回执（文档 7.2）。请求期间禁用按钮，防双击重复触发
-    async function offwork() {
-      const btn = document.getElementById('offwork-btn');
-      btn.disabled = true;
+    // ---- V2：下班提醒（到设定下班点弹一条；「还没」30 分钟后再问一次；再没有就不问了）----
+    let profileOffworkEnd = null;   // "19:00"
+    async function loadProfileForReminder() {
+      const res = await fetch('/api/profile', { headers: AUTH });
+      if (res.ok) profileOffworkEnd = ((await res.json()).profile || {}).off_work_end || null;
+    }
+
+    function reminderStore(vday, patch) {
+      const cur = JSON.parse(localStorage.getItem('offworkReminder') || '{}');
+      const rec = cur.vday === vday ? cur : { vday, asked: 0, nextAskAt: null, done: false };
+      Object.assign(rec, patch || {});
+      localStorage.setItem('offworkReminder', JSON.stringify(rec));
+      return rec;
+    }
+
+    function checkOffworkReminder(state) {
+      // 只在「还没生成今晚建议」的 home 视图提醒；虚拟时间由后端给
+      const bar = document.getElementById('offwork-reminder');
+      if (!profileOffworkEnd || state.view !== 'home' || state.today_advice) {
+        bar.style.display = 'none';
+        return;
+      }
+      const now = new Date(state.virtual_now);
+      const [h, m] = profileOffworkEnd.split(':').map(Number);
+      const end = new Date(state.virtual_now); end.setHours(h, m, 0, 0);
+      const rec = reminderStore(state.vday);
+      if (rec.done || rec.asked >= 2 || now < end) { bar.style.display = 'none'; return; }
+      if (rec.nextAskAt && now < new Date(rec.nextAskAt)) { bar.style.display = 'none'; return; }
+      bar.style.display = 'block';
+    }
+
+    function reminderYes() {
+      reminderStore(lastState.vday, { done: true });
+      document.getElementById('offwork-reminder').style.display = 'none';
+      offwork();
+    }
+
+    function reminderNo() {
+      const rec = reminderStore(lastState.vday);
+      const next = new Date(new Date(lastState.virtual_now).getTime() + 30 * 60 * 1000);
+      reminderStore(lastState.vday, {
+        asked: rec.asked + 1,
+        nextAskAt: rec.asked + 1 >= 2 ? null : next.toISOString(),   // 问满两次就不再问
+      });
+      document.getElementById('offwork-reminder').style.display = 'none';
+    }
+
+    // 每 30 秒拉一次状态：驱动提醒条 + 时钟显示跟随虚拟时间（演示拨时钟后无需手动刷新）
+    setInterval(async () => {
+      if (document.getElementById('state-view').style.display === 'block') return;   // 别打断选择
+      const res = await fetch('/api/state', { headers: AUTH });
+      if (!res.ok) return;
+      const state = await res.json();
+      lastState = state;
+      document.getElementById('clock-display').textContent = state.virtual_now_display;
+      if (state.view === 'home') checkOffworkReminder(state);
+      else document.getElementById('offwork-reminder').style.display = 'none';
+    }, 30000);
+
+    // 「下班了」（V2 改版）：生成前先问一句今晚状态；可能先要收昨晚回执（文档 7.2）
+    let pickedState;   // 本次「下班了」选的状态（回执流程结束后继续用）
+    function offwork() {
+      pickedState = undefined;
+      show('state-view');
+      document.getElementById('offwork-reminder').style.display = 'none';
+    }
+
+    // 选完状态（null=跳过）→ 真正调用生成
+    async function pickState(state) {
+      pickedState = state;
+      await doOffwork();
+    }
+
+    async function doOffwork() {
       setLoading(true);
-      const data = await api('/api/offwork');
+      const data = await api('/api/offwork', pickedState ? { state: pickedState } : {});
       setLoading(false);
-      btn.disabled = false;
       if (!data) return;
       if (data.rejected) { await refreshState(); return; }   // 劝退用户：转劝退视图
       if (data.need_feedback) {
@@ -235,18 +332,23 @@
         show('advice-view');
         toast(`已记下：${fb} ✓`);
       } else {
-        // 首次回执：紧接着生成今晚建议
+        // 首次回执：紧接着生成今晚建议（沿用「下班了」时已选的状态）
         toast(`已记下：${fb} ✓`);
-        await offwork();
+        await doOffwork();
       }
     }
 
-    // 一击纠正 → 重跑建议
+    // 一击纠正 / 难度微调 → 重跑建议
     async function correct(type) {
       setLoading(true);
       const data = await api('/api/correct', { type });
       setLoading(false);
       if (data && data.rejected) { await refreshState(); return; }   // 劝退用户
+      if (data && data.message && !data.new_level) {
+        // 难度已到边界：不重新生成，只提示
+        toast(data.message);
+        return;
+      }
       if (data && data.advice) {
         renderAdvice(data.advice); show('advice-view');
         if (data.yesterday_updated) {
@@ -374,6 +476,9 @@
       set('adv-severe-notice', a.severe_notice);
       set('adv-disclaimer', a.disclaimer);
       set('adv-sources', a.sources && a.sources.length ? '参考依据：' + a.sources.join('、') : null);
+      // 安全模式下不显示「再加一点」：运动本来就被撤了，加量按钮只会带来困惑
+      document.getElementById('harder-btn').style.display =
+        (a.safety_level && a.safety_level !== 'none') ? 'none' : '';
     }
 
     // 时间变化后重新拉 /api/state，界面随之切换（文档第八节）
@@ -386,7 +491,7 @@
       await refreshState();
     }
 
-    refreshState();
+    loadProfileForReminder().then(refreshState);
   </script>
 </body>
 </html>

@@ -32,9 +32,10 @@ CREATE TABLE IF NOT EXISTS profiles (
     age               INTEGER,
     height_cm         REAL,
     weight_kg         REAL,
-    chronic_condition TEXT,    -- V2：结构化病况（无/高血压/2型糖尿病/其他慢性病：…/严重疾病：…）
+    chronic_condition TEXT,    -- V2：确诊疾病自述原文（分类判断在后台词表）
     doctor_advice     TEXT,    -- V2：医嘱（可选多行），注入为硬约束
-    severe_flag       INTEGER DEFAULT 0  -- V2：严重疾病劝退标记（1=rejected 视图）
+    severe_flag       INTEGER DEFAULT 0,  -- V2：严重疾病劝退标记（1=rejected 视图）
+    favorite_foods    TEXT     -- V2：爱吃的食物类别，逗号分隔（软参考，给"最轻的改法"用）
 );
 
 CREATE TABLE IF NOT EXISTS daily_records (
@@ -107,6 +108,7 @@ PROFILE_FIELDS = [
     "work_body_state", "cooking", "diet_restrictions", "health_note",
     "wake_time", "exercise_base", "gender", "age", "height_cm", "weight_kg",
     "chronic_condition", "doctor_advice",   # V2：severe_flag 不在白名单——由后端派生，前端改不了
+    "favorite_foods",
 ]
 
 
@@ -122,7 +124,7 @@ def init_db() -> None:
             logger.info("db 迁移：profiles 表补充 wake_time 列")
         # V2 安全边界（S4）：结构化病况 / 医嘱 / 严重疾病劝退标记
         for col, ddl in (("chronic_condition", "TEXT"), ("doctor_advice", "TEXT"),
-                         ("severe_flag", "INTEGER DEFAULT 0")):
+                         ("severe_flag", "INTEGER DEFAULT 0"), ("favorite_foods", "TEXT")):
             if col not in cols:
                 conn.execute(f"ALTER TABLE profiles ADD COLUMN {col} {ddl}")
                 logger.info("db 迁移：profiles 表补充 %s 列", col)

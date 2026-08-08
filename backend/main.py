@@ -130,7 +130,10 @@ async def api_onboarding(payload: dict, request: Request):
 # ---------- 每日触点闭环（M4：文档 3.2 / 7.2 / 7.4 / 第九节） ----------
 
 FEEDBACK_OPTIONS = ("完成了", "只完成一部分", "完全没完成", "建议仍然太难", "跳过")
-CORRECT_TYPES = ("今晚更累", "时间更少", "不太舒服", "今天还行", "其实我做了")
+CORRECT_TYPES = ("今晚更累", "时间更少", "不太舒服", "今天还行", "其实我做了",
+                 "难度再低一点", "难度再高一点")   # 后两个是建议卡上的难度微调
+# 「下班了」时的状态自述选项（生成前先问一句，语义与一击纠正一致）
+OFFWORK_STATES = ("今晚更累", "时间更少", "不太舒服", "今天还行")
 
 # 每用户一把锁：防止双击「下班了」并发生成两条当日记录（B9）
 _offwork_locks: dict[int, threading.Lock] = {}
@@ -163,18 +166,29 @@ def _compute_today_baseline(user_id: int) -> int:
 
 
 def _run_and_save_today(user_id: int, username: str, record=None,
-                        extra_conditions: list[str] | None = None) -> dict:
-    """跑 Agent 并写库。record 为 None 时新建当日记录，否则更新（纠正/自由输入重跑）。"""
+                        extra_conditions: list[str] | None = None,
+                        offwork_state: str | None = None) -> dict:
+    """跑 Agent 并写库。record 为 None 时新建当日记录，否则更新（纠正/自由输入重跑）。
+    offwork_state：「下班了」时的状态自述（今晚更累/时间更少/不太舒服/今天还行），
+    存进 conditions 后当天所有重生成都会带着它（上下文注入 + 安全扫描）。"""
     if record is None:
         level = _compute_today_baseline(user_id)
         conditions = {"来源": "offwork", "档位": level, "纠正": []}
+        if offwork_state:
+            conditions["下班状态"] = offwork_state
     else:
         level = record["baseline_level"] if record["baseline_level"] is not None else 3
         conditions = json.loads(record["conditions_json"] or "{}")
+    state_line = (f"用户下班时自述状态：{conditions['下班状态']}"
+                  if conditions.get("下班状态") else None)
+    if state_line:
+        extra_conditions = [state_line] + (extra_conditions or [])
 
     # 输入侧安全检测（V2 三层架构入口）：当天全部自由输入 + 纠正项 + 档案（健康备注/结构化病况）。
     # 当天说过的危险信号对当晚整晚有效——之后不管因为什么重新生成建议，都带着这个等级。
     texts = db.get_free_inputs(user_id, clock.today()) + list(conditions.get("纠正", []))
+    if conditions.get("下班状态"):
+        texts.append(conditions["下班状态"])   # "不太舒服"这类状态自述也要过安全检测
     profile = db.get_profile(user_id)
     safety_state = safety.assess(
         texts,
@@ -225,8 +239,9 @@ def _run_and_save_today(user_id: int, username: str, record=None,
 
 
 @app.post("/api/offwork")
-async def api_offwork(request: Request):
-    """「下班了」：先查昨日待回执（7.2），有则让前端先收回执；否则生成今晚建议。"""
+async def api_offwork(request: Request, payload: dict | None = None):
+    """「下班了」：先查昨日待回执（7.2），有则让前端先收回执；否则生成今晚建议。
+    payload 可带 {"state": "今晚更累"}——生成前前端先问一句今晚状态，作为初始条件注入。"""
     user_id = _current_user_id(request)
     if user_id is None:
         return JSONResponse(status_code=401, content={"error": "未登录"})
@@ -262,8 +277,10 @@ async def api_offwork(request: Request):
                 },
             }
 
-        logger.info("user=%s event=offwork 触发建议生成", username)
-        advice = _run_and_save_today(user_id, username)
+        state = (payload or {}).get("state")
+        state = state if state in OFFWORK_STATES else None
+        logger.info("user=%s event=offwork 触发建议生成 状态自述=%s", username, state)
+        advice = _run_and_save_today(user_id, username, offwork_state=state)
         return {"advice": advice}
 
 
@@ -330,6 +347,36 @@ async def api_correct(payload: dict, request: Request):
         return JSONResponse(status_code=400, content={"error": "今天还没有建议，先点「下班了」"})
     username = db.get_username(user_id)
     logger.info("user=%s event=correct type=%s 重跑建议", username, ctype)
+
+    # 难度微调（V2 追加）：只动今晚档位。措辞不进安全检测文本（"难度再高一点"不是
+    # 风险信号，不会被组合规则拦截）；上限受档位表约束——正常 4、慢性病 3（四镣铐）。
+    if ctype in ("难度再低一点", "难度再高一点"):
+        old_level = record["baseline_level"] if record["baseline_level"] is not None else 3
+        cap = 3 if safety.assess([], health_note=p["health_note"] if p else None,
+                                 chronic_condition=p["chronic_condition"] if p else None
+                                 )["chronic_managed"] else 4
+        new_level = max(0, min(cap, old_level + (1 if ctype == "难度再高一点" else -1)))
+        if new_level == old_level:
+            msg = ("今晚已经是最低档了——再低就只剩好好吃饭、早点睡了" if ctype == "难度再低一点"
+                   else "结合你的情况，今晚这个量已经是合适的上限了，先按这个来")
+            return {"ok": True, "message": msg, "advice": json.loads(record["advice_json"])}
+        record = dict(record)
+        conditions = json.loads(record["conditions_json"] or "{}")
+        conditions["档位"] = new_level
+        record["baseline_level"] = new_level
+        record["conditions_json"] = json.dumps(conditions, ensure_ascii=False)
+        conn = db.get_conn()
+        try:
+            conn.execute("UPDATE daily_records SET baseline_level = ? WHERE id = ?",
+                         (new_level, record["id"]))
+            conn.commit()
+        finally:
+            conn.close()
+        direction = "低" if ctype == "难度再低一点" else "高"
+        extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
+        extra.append(f"用户希望今晚建议的难度再{direction}一点（档位已从 {old_level} 调整为 {new_level}）")
+        advice = _run_and_save_today(user_id, username, record=record, extra_conditions=extra)
+        return {"advice": advice, "new_level": new_level}
 
     # 「其实我做了」＝昨晚的回执报错了：把昨天记录改成「完成了」，档位跟着重算（B7）
     yesterday_updated = False
