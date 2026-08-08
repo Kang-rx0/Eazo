@@ -2,239 +2,514 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>填写信息</title>
-  <style>
-    /* 最小结构样式，精致 UI 由队友负责 */
-    fieldset { margin-bottom: 12px; }
-    label { margin-right: 12px; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>值夜 · 先认识一下</title>
+  <link rel="stylesheet" href="nightwatch.css">
 </head>
 <body>
-  <!-- onboarding 表单，兼作「我的资料」编辑页（?edit=1 时预填现有值） -->
-  <h1 id="page-title">首次进入 · 花一分钟告诉我你的日常</h1>
-  <p id="back-link" style="display:none;"><a href="app.html">← 返回主界面</a></p>
-
-  <fieldset>
-    <legend>一般几点下班？</legend>
-    <label>从
-      <select id="off_work_start">
-        <option>17:00</option><option>17:30</option><option selected>18:00</option>
-        <option>18:30</option><option>19:00</option><option>20:00</option><option>21:00</option>
-      </select>
-    </label>
-    <label>到
-      <select id="off_work_end">
-        <option>18:00</option><option>18:30</option><option selected>19:00</option>
-        <option>19:30</option><option>20:00</option><option>21:00</option><option>22:00</option>
-      </select>
-    </label>
-    <label>加班频率
-      <select id="overtime_freq">
-        <option>几乎不加班</option><option selected>偶尔加班</option><option>经常加班</option>
-      </select>
-    </label>
-  </fieldset>
-
-  <fieldset>
-    <legend>通勤单程大概多久？</legend>
-    <select id="commute_min">
-      <option value="10">10 分钟以内</option>
-      <option value="20">20 分钟左右</option>
-      <option value="30" selected>30 分钟左右</option>
-      <option value="45">45 分钟左右</option>
-      <option value="60">1 小时左右</option>
-      <option value="90">1 个半小时以上</option>
-    </select>
-  </fieldset>
-
-  <fieldset>
-    <legend>上班时身体状态？</legend>
-    <label><input type="radio" name="work_body_state" value="久坐" checked> 基本久坐</label>
-    <label><input type="radio" name="work_body_state" value="站着走动"> 站着/常走动</label>
-    <label><input type="radio" name="work_body_state" value="体力消耗"> 体力消耗大</label>
-  </fieldset>
-
-  <fieldset>
-    <legend>晚上能做饭吗？</legend>
-    <label><input type="radio" name="cooking" value="只能外卖" checked> 只能外卖</label>
-    <label><input type="radio" name="cooking" value="能简单做"> 能简单做点</label>
-    <label><input type="radio" name="cooking" value="能正经做"> 能正经做饭</label>
-  </fieldset>
-
-  <fieldset>
-    <legend>饮食禁忌（可多选，可跳过）</legend>
-    <label><input type="checkbox" name="diet" value="不吃辣"> 不吃辣</label>
-    <label><input type="checkbox" name="diet" value="海鲜过敏"> 海鲜过敏</label>
-    <label><input type="checkbox" name="diet" value="乳糖不耐受"> 乳糖不耐受</label>
-    <label><input type="checkbox" name="diet" value="素食"> 素食</label>
-    <label><input type="checkbox" name="diet" value="不吃牛羊肉"> 不吃牛羊肉</label>
-  </fieldset>
-
-  <!-- V2：爱吃的食物类别（软参考——顺着爱好给"最轻的改法"，不没收爱好） -->
-  <fieldset>
-    <legend>平时爱吃什么？（可多选，可跳过——我们不没收爱好，只帮你吃得舒服点）</legend>
-    <label><input type="checkbox" name="fav" value="粉面类"> 粉面类（螺蛳粉/拌粉/汤面）</label>
-    <label><input type="checkbox" name="fav" value="炸物快餐"> 炸物快餐（炸鸡/汉堡/薯条）</label>
-    <label><input type="checkbox" name="fav" value="盖饭便当"> 盖饭/便当/米饭类</label><br>
-    <label><input type="checkbox" name="fav" value="火锅麻辣烫"> 火锅/麻辣烫/串</label>
-    <label><input type="checkbox" name="fav" value="烧烤夜宵"> 烧烤/夜宵</label>
-    <label><input type="checkbox" name="fav" value="甜品奶茶"> 甜品/奶茶/饮料</label><br>
-    <label><input type="checkbox" name="fav" value="轻食沙拉"> 轻食/沙拉</label>
-    <label><input type="checkbox" name="fav" value="家常菜"> 自己做的家常菜</label>
-  </fieldset>
-
-  <fieldset>
-    <legend>平时几点起床？（用来倒推今晚几点该停）</legend>
-    <select id="wake_time">
-      <option>06:00</option><option>06:30</option><option selected>07:00</option>
-      <option>07:30</option><option>08:00</option><option>08:30</option><option>09:00</option>
-    </select>
-  </fieldset>
-
-  <fieldset>
-    <legend>有需要注意的健康问题吗？（一行，可跳过）</legend>
-    <input id="health_note" placeholder="比如：腰不好 / 胃不太好" size="40">
-  </fieldset>
-
-  <!-- V2 安全边界（S4，2026-08-08 改版）：确诊疾病自由填写，分类判断全在后台词表做 -->
-  <fieldset>
-    <legend>有确诊的疾病吗？（例如：高血压、2型糖尿病，没有可跳过）</legend>
-    <input id="chronic_condition" size="40" placeholder="自己的话写就行，比如：高血压五六年了"
-           oninput="chronicChanged()">
-    <div id="doctor-advice-wrap" style="display:none; margin-top:6px;">
-      医生对你的饮食/运动有过嘱咐吗？填了我们会严格照着来。（可跳过）<br>
-      <textarea id="doctor_advice" rows="3" cols="46" placeholder="比如：晚餐主食减半，不做剧烈运动，饭后可散步"></textarea>
+  <!-- V3 P3：onboarding 分步化（队友 ob-1~ob-5 + 新增第 6 步口味偏好）+ 编辑态（?edit=1&sec=ob-4）。
+       字段对齐差异清单 ③-14：显示文案用队友的，data-val 一律用后端枚举。
+       病况区按 ③-5 决策：chips 真实可选 + 自由输入，合并成一句存 chronic_condition，
+       前端零判断零词表——慢性/严重/无 全部由后端定，提交后按 /api/state 的 view 走。 -->
+  <header class="topbar">
+    <button class="navicon back" type="button" id="navBack" aria-label="返回" hidden>
+      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="badge">
+      <div class="face" data-mood="happy" aria-hidden="true"><i class="l"></i><i class="r"></i><u></u></div>
+      <div>
+        <b>值夜</b>
+        <s>今晚值班</s>
+      </div>
     </div>
-  </fieldset>
+  </header>
 
-  <fieldset>
-    <legend>运动基础</legend>
-    <select id="exercise_base">
-      <option selected>无/偶尔</option><option>每周1-2次</option><option>每周3次以上</option>
-    </select>
-  </fieldset>
+  <main class="screens">
 
-  <fieldset>
-    <legend>可选：用于估算量级的参数（全部可跳过）</legend>
-    <label>性别
-      <select id="gender">
-        <option value="">不填</option><option value="男">男</option><option value="女">女</option>
-      </select>
-    </label>
-    <label>年龄 <input id="age" type="number" min="14" max="99" style="width:4em"></label>
-    <label>身高cm <input id="height_cm" type="number" min="120" max="230" style="width:5em"></label>
-    <label>体重kg <input id="weight_kg" type="number" min="30" max="200" style="width:5em"></label>
-  </fieldset>
+    <!-- 1 上下班双滚轮 + 收工规律 + 通勤 -->
+    <section class="screen" id="s-ob-1">
+      <div class="body">
+        <p class="clock" data-step-caption></p>
+        <p class="tag">先认识一下</p>
+        <h1>一般几点<br>上下班</h1>
+        <p class="sub">我用它算你一天有多长、几点找你。</p>
+        <div class="wheelset" role="group" aria-label="上下班时间">
+          <div class="wheelcol">
+            <p>上班</p>
+            <div class="wheel"><div class="wheeltrack" id="wheelOn" aria-label="上班时间"></div></div>
+          </div>
+          <div class="wheelspan-sep" aria-hidden="true">→</div>
+          <div class="wheelcol">
+            <p>下班</p>
+            <div class="wheel"><div class="wheeltrack" id="wheelOff" aria-label="下班时间"></div></div>
+          </div>
+        </div>
+        <p class="worklen" id="workLen"></p>
+        <div class="editgroup">
+          <p>你的收工时间通常规律吗</p>
+          <!-- 显示队友文案、data-val 用后端枚举（③-14） -->
+          <div class="chips" role="group" aria-label="收工时间是否规律">
+            <button class="chip" type="button" data-one="overtime_freq" data-val="几乎不加班">大致固定</button>
+            <button class="chip" type="button" data-one="overtime_freq" data-val="经常加班">经常比预计晚</button>
+            <button class="chip" type="button" data-one="overtime_freq" data-val="偶尔加班" aria-pressed="true">每天说不准</button>
+          </div>
+        </div>
+        <div class="editgroup">
+          <p>回家路上要多久</p>
+          <div class="chips" role="group" aria-label="通勤时长">
+            <button class="chip" type="button" data-one="commute_min" data-val="15">15 分钟</button>
+            <button class="chip" type="button" data-one="commute_min" data-val="30" aria-pressed="true">30 分钟</button>
+            <button class="chip" type="button" data-one="commute_min" data-val="45">45 分钟</button>
+            <button class="chip" type="button" data-one="commute_min" data-val="60">60 分钟以上</button>
+          </div>
+        </div>
+        <p class="voice">拿不准就先选个大概，之后随时能改。</p>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" data-next>下一步</button>
+        <button class="btn primary" type="button" data-save hidden>存好了</button>
+      </div>
+    </section>
 
-  <p><button id="submit-btn" onclick="submitOnboarding()">完成，进入主界面</button></p>
-  <p id="msg" style="color: #c00;"></p>
-  <p id="success-msg" style="display:none; color: #2a7;">已保存 ✓（修改资料不会自动重出今晚建议，可回主界面用「一击纠正」或补一句话让它重新想）</p>
+    <!-- 2 工作日身体状态（「今天有没有额外动一动」按计划本期删除） -->
+    <section class="screen" id="s-ob-2">
+      <div class="body">
+        <p class="clock" data-step-caption></p>
+        <p class="tag">先认识一下</p>
+        <h1>这一天<br>身体经历了什么</h1>
+        <p class="sub">决定今晚该走走、该拉伸，还是该纯歇。</p>
+        <div class="opts" role="group" aria-label="工作日身体状态">
+          <button class="opt" type="button" data-one="work_body_state" data-val="久坐" aria-pressed="true">基本坐着，一天下来发僵</button>
+          <button class="opt" type="button" data-one="work_body_state" data-val="站着走动">站着走动，腿最累</button>
+          <button class="opt" type="button" data-one="work_body_state" data-val="体力消耗">出体力，整个人被榨干</button>
+        </div>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" data-next>下一步</button>
+        <button class="btn primary" type="button" data-save hidden>存好了</button>
+      </div>
+    </section>
+
+    <!-- 3 平时三餐怎么解决：队友四选收回后端三选（③-14，「食堂」并入只能外卖） -->
+    <section class="screen" id="s-ob-3">
+      <div class="body">
+        <p class="clock" data-step-caption></p>
+        <p class="tag">先认识一下</p>
+        <h1>平时吃饭<br>主要靠什么</h1>
+        <p class="sub">问的是你平时的习惯。今晚具体怎么吃，到时候再说。</p>
+        <div class="opts" role="group" aria-label="平时三餐怎么解决">
+          <button class="opt" type="button" data-one="cooking" data-val="只能外卖" aria-pressed="true">大多点外卖，或吃食堂</button>
+          <button class="opt" type="button" data-one="cooking" data-val="能简单做">几样混着来，能简单做点</button>
+          <button class="opt" type="button" data-one="cooking" data-val="能正经做">基本自己做</button>
+        </div>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" data-next>下一步</button>
+        <button class="btn primary" type="button" data-save hidden>存好了</button>
+      </div>
+    </section>
+
+    <!-- 4 安全边界：饮食禁忌 + 病况（三件套之一二） -->
+    <section class="screen" id="s-ob-4">
+      <div class="body">
+        <p class="clock" data-step-caption></p>
+        <p class="tag">可跳过</p>
+        <h1>有什么<br>要绕开的</h1>
+        <p class="sub">记着就好，这些事我嘴严，不到处讲。</p>
+        <div class="editgroup">
+          <p>饮食禁忌与过敏，可多选</p>
+          <div class="chips" role="group" aria-label="饮食禁忌与过敏">
+            <button class="chip" type="button" data-many="diet" data-val="海鲜过敏">海鲜过敏</button>
+            <button class="chip" type="button" data-many="diet" data-val="乳糖不耐受">乳糖不耐</button>
+            <button class="chip" type="button" data-many="diet" data-val="不吃辣">不吃辣</button>
+            <button class="chip" type="button" data-many="diet" data-val="素食">素食</button>
+            <button class="chip" type="button" data-many="diet" data-val="不吃牛羊肉">不吃牛羊肉</button>
+          </div>
+          <input class="field" id="dietInput" type="text" autocomplete="off"
+                 placeholder="其他忌口就补一句，比如不吃香菜" aria-label="饮食禁忌补充" style="margin-top:9px">
+        </div>
+        <div class="editgroup">
+          <p>有确诊的疾病吗？常见的先点，也可以在下面自己写</p>
+          <!-- ③-5：chips 真实可选，只负责往病况里添字；判断全在后端 -->
+          <div class="chips" role="group" aria-label="常见病况">
+            <button class="chip" type="button" data-many="cc" data-val="高血压">高血压</button>
+            <button class="chip" type="button" data-many="cc" data-val="糖尿病">糖尿病</button>
+            <button class="chip" type="button" data-many="cc" data-val="心脏病">心脏病</button>
+          </div>
+          <input class="field" id="ccInput" type="text" autocomplete="off"
+                 placeholder="自己的话写就行，比如：高血压五六年了" aria-label="病况自述" style="margin-top:9px">
+        </div>
+        <!-- ②-9：病况非空才展开医嘱框（医嘱强参考路径的入口） -->
+        <div class="editgroup" id="docAdviceWrap" hidden>
+          <p>医生对你的饮食/运动有过嘱咐吗？填了我会严格照着来</p>
+          <textarea class="field" id="docAdvice" rows="3"
+                    placeholder="比如：晚餐主食减半，不做剧烈运动，饭后可散步" aria-label="医嘱"></textarea>
+        </div>
+        <div class="editgroup">
+          <p>身体上还有别的要注意的吗</p>
+          <input class="field" id="healthNote" type="text" autocomplete="off"
+                 placeholder="比如：腰不好 / 胃不太好" aria-label="健康备注">
+        </div>
+        <p class="voice">说一次，我记着，不会再问第二遍。</p>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" data-next>下一步</button>
+        <button class="textlink" type="button" data-next data-skip>这几项都跳过</button>
+        <button class="btn primary" type="button" data-save hidden>存好了</button>
+      </div>
+    </section>
+
+    <!-- 5 安全参数：起床滚轮（②-11）+ 运动基础（②-12）+ 性别/年龄数字/身高体重（②-13） -->
+    <section class="screen" id="s-ob-5">
+      <div class="body">
+        <p class="clock" data-step-caption></p>
+        <p class="tag">可跳过</p>
+        <h1>再多懂你一点<br>建议才更准</h1>
+        <p class="sub">跟前面填的一样，这些也是你的长期底子——配合每天的状态，把吃法和动法给得更准。</p>
+        <div class="editgroup">
+          <p>平时几点起床（用来倒推今晚几点该停）</p>
+          <div class="wheelset" style="margin-top:0">
+            <div class="wheelcol">
+              <div class="wheel"><div class="wheeltrack" id="wheelWake" aria-label="起床时间"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="editgroup">
+          <p>平时动得多吗</p>
+          <div class="chips" role="group" aria-label="运动基础">
+            <button class="chip" type="button" data-one="exercise_base" data-val="无/偶尔" aria-pressed="true">几乎不动</button>
+            <button class="chip" type="button" data-one="exercise_base" data-val="每周1-2次">每周一两次</button>
+            <button class="chip" type="button" data-one="exercise_base" data-val="每周3次以上">每周三次以上</button>
+          </div>
+        </div>
+        <div class="editgroup">
+          <p>性别（可不选）</p>
+          <div class="chips" role="group" aria-label="性别">
+            <button class="chip" type="button" data-one="gender" data-val="女" data-clearable>女</button>
+            <button class="chip" type="button" data-one="gender" data-val="男" data-clearable>男</button>
+          </div>
+        </div>
+        <div class="editgroup">
+          <p>年龄</p>
+          <input class="field" id="ageInput" type="text" inputmode="numeric" autocomplete="off"
+                 placeholder="按数字写，比如 28" aria-label="年龄">
+        </div>
+        <div class="editgroup">
+          <p>身高体重</p>
+          <div class="inline-row">
+            <input class="field" id="heightInput" type="text" inputmode="numeric" autocomplete="off" placeholder="身高" aria-label="身高厘米">
+            <span class="unit">cm</span>
+            <input class="field" id="weightInput" type="text" inputmode="numeric" autocomplete="off" placeholder="体重" aria-label="体重公斤">
+            <span class="unit">kg</span>
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" data-next>下一步</button>
+        <button class="textlink" type="button" data-next data-skip>这几项先跳过</button>
+        <button class="btn primary" type="button" data-save hidden>存好了</button>
+      </div>
+    </section>
+
+    <!-- 6 口味偏好（②-10 决策：挂 onboarding 可跳过的一步；类别用 B5 后端定稿值） -->
+    <section class="screen" id="s-ob-6">
+      <div class="body">
+        <p class="clock" data-step-caption></p>
+        <p class="tag">随时可改</p>
+        <h1>你常吃<br>哪几类</h1>
+        <p class="sub">勾了我就知道往哪边轻推，不没收爱好。不勾也行，你说了我再接。</p>
+        <div class="editgroup">
+          <p>常吃形态，可多选</p>
+          <div class="chips" role="group" aria-label="常吃形态">
+            <button class="chip" type="button" data-many="fav" data-val="粉面">粉面</button>
+            <button class="chip" type="button" data-many="fav" data-val="炸物快餐">炸物快餐</button>
+            <button class="chip" type="button" data-many="fav" data-val="盖饭便当">盖饭便当</button>
+            <button class="chip" type="button" data-many="fav" data-val="火锅麻辣烫">火锅麻辣烫</button>
+            <button class="chip" type="button" data-many="fav" data-val="烧烤夜宵">烧烤夜宵</button>
+            <button class="chip" type="button" data-many="fav" data-val="甜品饮料">甜品饮料</button>
+            <button class="chip" type="button" data-many="fav" data-val="轻食沙拉">轻食沙拉</button>
+            <button class="chip" type="button" data-many="fav" data-val="自己做的家常">自己做的家常</button>
+          </div>
+        </div>
+        <p class="note">这里不写热量，也不写该吃多少。只记你常吃什么形态。</p>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" data-finish>走完了，看今晚</button>
+        <button class="btn primary" type="button" data-save hidden>存好了</button>
+      </div>
+    </section>
+
+  </main>
+
+  <p class="toast" id="toast" role="status"></p>
 
   <script>
     const token = localStorage.getItem('token');
     if (!token) location.href = 'auth.html';   // 未登录先去登录
 
-    // ?edit=1 时是「我的资料」编辑模式：预填现有值，保存后不跳转、不重出建议
-    const editMode = new URLSearchParams(location.search).has('edit');
-    if (editMode) {
-      document.getElementById('page-title').textContent = '我的资料';
-      document.getElementById('submit-btn').textContent = '保存修改';
-      document.getElementById('back-link').style.display = 'block';
-      prefill();
+    const params = new URLSearchParams(location.search);
+    const editMode = params.has('edit');
+    // 编辑态可指定进哪一步：?edit=1&sec=ob-4（pref 是 ob-6 的别名，给设置页用）
+    const editSec = { 'pref': 'ob-6' }[params.get('sec')] || params.get('sec') || 'ob-1';
+
+    const STEPS = ['ob-1', 'ob-2', 'ob-3', 'ob-4', 'ob-5', 'ob-6'];
+    let stepIdx = 0;
+
+    /* ---------- toast：所有改动必有明确反馈 ---------- */
+    let toastTimer;
+    function toast(text) {
+      const t = document.getElementById('toast');
+      t.textContent = text;
+      t.setAttribute('data-show', '');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.removeAttribute('data-show'), 2200);
     }
 
-    function radioValue(name) {
-      return document.querySelector(`input[name="${name}"]:checked`).value;
+    /* ---------- 屏幕切换 ---------- */
+    function show(step) {
+      stepIdx = STEPS.indexOf(step);
+      document.querySelectorAll('.screen').forEach(s =>
+        s.id === 's-' + step ? s.setAttribute('data-active', '') : s.removeAttribute('data-active'));
+      // 返回箭头：第一步隐藏；编辑态一直显示（回设置）
+      document.getElementById('navBack').hidden = !editMode && stepIdx === 0;
+      // 步骤标注
+      document.querySelectorAll('[data-step-caption]').forEach(c => {
+        c.textContent = editMode ? '修改资料' : `第 ${stepIdx + 1} 步 / ${STEPS.length}`;
+      });
+      document.querySelector(`#s-${step} .body`).scrollTop = 0;
+    }
+    document.getElementById('navBack').addEventListener('click', () => {
+      if (editMode) { leaveEdit(); return; }
+      if (stepIdx > 0) show(STEPS[stepIdx - 1]);
+    });
+    function leaveEdit() {
+      // 从设置进来的（app.html）就回去；直接开的就去主界面
+      if (document.referrer && new URL(document.referrer).origin === location.origin
+          && document.referrer.includes('app.html')) history.back();
+      else location.href = 'app.html';
     }
 
-    // 填了病况就展开医嘱框（分不分类由后台词表判断，前端不做任何判断）
-    function chronicChanged() {
-      const filled = document.getElementById('chronic_condition').value.trim() !== '';
-      document.getElementById('doctor-advice-wrap').style.display = filled ? 'block' : 'none';
+    /* ---------- chips / opts 通用选择 ----------
+       data-one：组内单选；带 data-clearable 的可再点取消（性别可不选）。
+       data-many：多选开关。所有状态都留在 DOM 的 aria-pressed 上，提交时现收。 */
+    document.querySelectorAll('[data-one]').forEach(el => {
+      el.addEventListener('click', () => {
+        const group = el.getAttribute('data-one');
+        const wasOn = el.getAttribute('aria-pressed') === 'true';
+        document.querySelectorAll(`[data-one="${group}"]`).forEach(o => o.setAttribute('aria-pressed', 'false'));
+        el.setAttribute('aria-pressed', String(!(wasOn && el.hasAttribute('data-clearable'))));
+      });
+    });
+    document.querySelectorAll('[data-many]').forEach(el => {
+      el.addEventListener('click', () => {
+        el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true'));
+        if (el.getAttribute('data-many') === 'cc') ccChanged();
+      });
+    });
+    function oneVal(group) {
+      const el = document.querySelector(`[data-one="${group}"][aria-pressed="true"]`);
+      return el ? el.getAttribute('data-val') : null;
+    }
+    function manyVals(group) {
+      return [...document.querySelectorAll(`[data-many="${group}"][aria-pressed="true"]`)]
+        .map(el => el.getAttribute('data-val'));
+    }
+    function setOne(group, val) {
+      document.querySelectorAll(`[data-one="${group}"]`).forEach(o =>
+        o.setAttribute('aria-pressed', String(o.getAttribute('data-val') === String(val))));
     }
 
-    // 编辑模式：用现有档案预填表单
+    /* ---------- 病况区：chips 或输入框非空 → 展开医嘱框（②-9）。前端不做任何医学判断 ---------- */
+    function ccChanged() {
+      const filled = manyVals('cc').length > 0 || document.getElementById('ccInput').value.trim() !== '';
+      document.getElementById('docAdviceWrap').hidden = !filled;
+    }
+    document.getElementById('ccInput').addEventListener('input', ccChanged);
+
+    /* ---------- 时间滚轮（照队友原型：40px 行高 + scroll-snap + 防抖读值） ---------- */
+    const WHEEL_ROW = 40;
+    function timeList(startH, endH) {          // endH 可 >24 表示跨零点
+      const out = [];
+      for (let m = startH * 60; m <= endH * 60; m += 30) {
+        out.push(String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'));
+      }
+      return out;
+    }
+    const WHEELS = {
+      on:   { id: 'wheelOn',   list: timeList(6, 14),  val: '09:00' },
+      off:  { id: 'wheelOff',  list: timeList(16, 26), val: '19:00' },
+      wake: { id: 'wheelWake', list: timeList(5, 10),  val: '07:00' },
+    };
+    function buildWheel(key) {
+      const w = WHEELS[key];
+      const track = document.getElementById(w.id);
+      w.list.forEach(v => {
+        const s = document.createElement('span');
+        s.textContent = v;
+        track.appendChild(s);
+      });
+      let timer;
+      track.addEventListener('scroll', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const idx = Math.max(0, Math.min(w.list.length - 1, Math.round(track.scrollTop / WHEEL_ROW)));
+          w.val = w.list[idx];
+          markWheel(key, idx);
+          if (key !== 'wake') renderWorkLen();
+        }, 90);
+      }, { passive: true });
+    }
+    function markWheel(key, idx) {
+      document.getElementById(WHEELS[key].id).querySelectorAll('span').forEach((s, i) =>
+        i === idx ? s.setAttribute('data-on', '') : s.removeAttribute('data-on'));
+    }
+    function setWheel(key, val) {
+      const w = WHEELS[key];
+      let idx = w.list.indexOf(val);
+      if (idx < 0) idx = w.list.indexOf(w.val);   // 不在档位表里（老账号旧值）就停在默认值
+      if (idx < 0) idx = 0;
+      w.val = w.list[idx];
+      document.getElementById(w.id).scrollTop = idx * WHEEL_ROW;
+      markWheel(key, idx);
+    }
+    function wheelMinutes(key) {                 // off 列表把跨零点编码成 24:00→1440
+      const w = WHEELS[key];
+      const base = key === 'on' ? 6 : 16;
+      return base * 60 + w.list.indexOf(w.val) * 30;
+    }
+    function renderWorkLen() {
+      const mins = wheelMinutes('off') - wheelMinutes('on');
+      const h = Math.floor(mins / 60), m = mins % 60;
+      document.getElementById('workLen').innerHTML =
+        '这一天大约 <b>' + h + (m ? ' 小时 ' + m + ' 分' : ' 小时') + '</b>';
+    }
+    Object.keys(WHEELS).forEach(buildWheel);
+
+    /* ---------- 组装 payload：键名与 db.PROFILE_FIELDS 一一对齐 ---------- */
+    const num = id => { const v = document.getElementById(id).value.trim(); return v ? Number(v) : null; };
+    function buildPayload() {
+      // 病况合并（③-5）：chips 选中值 + 自由输入合并成一句；输入里已写过的病名不重复
+      const ccText = document.getElementById('ccInput').value.trim();
+      const ccChips = manyVals('cc').filter(c => !ccText.includes(c));
+      const chronic = [ccChips.join('、'), ccText].filter(Boolean).join('，');
+      // 饮食禁忌：chips + 补充一句 合并进 diet_restrictions
+      const dietText = document.getElementById('dietInput').value.trim();
+      const diet = [...manyVals('diet'), ...(dietText ? [dietText] : [])].join(',');
+      return {
+        off_work_start: WHEELS.on.val,
+        off_work_end: WHEELS.off.val,
+        overtime_freq: oneVal('overtime_freq') || '偶尔加班',
+        commute_min: Number(oneVal('commute_min') || 30),
+        work_body_state: oneVal('work_body_state') || '久坐',
+        cooking: oneVal('cooking') || '只能外卖',
+        diet_restrictions: diet || null,
+        health_note: document.getElementById('healthNote').value.trim() || null,
+        wake_time: WHEELS.wake.val,
+        exercise_base: oneVal('exercise_base') || '无/偶尔',
+        gender: oneVal('gender'),
+        age: num('ageInput'),
+        height_cm: num('heightInput'),
+        weight_kg: num('weightInput'),
+        chronic_condition: chronic || null,
+        doctor_advice: document.getElementById('docAdvice').value.trim() || null,
+        favorite_foods: manyVals('fav').join(',') || null,
+      };
+    }
+
+    /* ---------- 编辑态预填：/api/profile 灌回全部控件 ---------- */
     async function prefill() {
       const res = await fetch('/api/profile', { headers: { 'Authorization': 'Bearer ' + token } });
       if (!res.ok) return;
       const p = (await res.json()).profile;
       if (!p) return;
-      const setVal = (id, v) => { if (v != null) document.getElementById(id).value = v; };
-      setVal('off_work_start', p.off_work_start);
-      setVal('off_work_end', p.off_work_end);
-      setVal('overtime_freq', p.overtime_freq);
-      setVal('commute_min', p.commute_min);
-      setVal('wake_time', p.wake_time);
-      setVal('exercise_base', p.exercise_base);
-      setVal('health_note', p.health_note || '');
-      setVal('gender', p.gender || '');
-      setVal('age', p.age); setVal('height_cm', p.height_cm); setVal('weight_kg', p.weight_kg);
-      for (const name of ['work_body_state', 'cooking']) {
-        const el = document.querySelector(`input[name="${name}"][value="${p[name]}"]`);
-        if (el) el.checked = true;
+      setWheel('on', p.off_work_start);
+      setWheel('off', p.off_work_end);
+      setWheel('wake', p.wake_time);
+      if (p.overtime_freq) setOne('overtime_freq', p.overtime_freq);
+      if (p.commute_min != null) {                       // 老档位（10/20/90…）收到最近的 chip
+        const chips = [15, 30, 45, 60];
+        const nearest = chips.reduce((a, b) => Math.abs(b - p.commute_min) < Math.abs(a - p.commute_min) ? b : a);
+        setOne('commute_min', nearest);
       }
-      const diets = (p.diet_restrictions || '').split(',');
-      for (const el of document.querySelectorAll('input[name="diet"]')) {
-        el.checked = diets.includes(el.value);
-      }
-      const favs = (p.favorite_foods || '').split(',');
-      for (const el of document.querySelectorAll('input[name="fav"]')) {
-        el.checked = favs.includes(el.value);
-      }
-      // 病况预填：原文回显（旧格式"严重疾病：xxx"去掉前缀，只显示 xxx）
+      if (p.work_body_state) setOne('work_body_state', p.work_body_state);
+      if (p.cooking) setOne('cooking', p.cooking);
+      if (p.exercise_base) setOne('exercise_base', p.exercise_base);
+      if (p.gender) setOne('gender', p.gender);
+      document.getElementById('ageInput').value = p.age ?? '';
+      document.getElementById('heightInput').value = p.height_cm ?? '';
+      document.getElementById('weightInput').value = p.weight_kg ?? '';
+      document.getElementById('healthNote').value = p.health_note || '';
+      // 饮食禁忌：词在 chips 里的点亮，剩下的进补充输入框
+      const dietVals = (p.diet_restrictions || '').split(',').filter(Boolean);
+      const dietChipVals = [...document.querySelectorAll('[data-many="diet"]')].map(el => el.getAttribute('data-val'));
+      dietVals.forEach(v => {
+        const el = document.querySelector(`[data-many="diet"][data-val="${v}"]`);
+        if (el) el.setAttribute('aria-pressed', 'true');
+      });
+      document.getElementById('dietInput').value = dietVals.filter(v => !dietChipVals.includes(v)).join(',');
+      // 口味偏好（库里已是 B5 新名）
+      (p.favorite_foods || '').split(',').filter(Boolean).forEach(v => {
+        const el = document.querySelector(`[data-many="fav"][data-val="${v}"]`);
+        if (el) el.setAttribute('aria-pressed', 'true');
+      });
+      // 病况：原文整句回显在输入框（旧格式"严重疾病：xxx"剥掉前缀），chips 不点亮——
+      // 保存时 chips 只增不删，整句在输入框里怎么改都以输入框为准
       const cc = p.chronic_condition || '';
-      setVal('chronic_condition', cc.startsWith('严重疾病：') ? cc.slice(5) : cc);
-      setVal('doctor_advice', p.doctor_advice || '');
-      chronicChanged();
+      document.getElementById('ccInput').value = cc.startsWith('严重疾病：') ? cc.slice(5) : cc;
+      document.getElementById('docAdvice').value = p.doctor_advice || '';
+      ccChanged();
+      renderWorkLen();
     }
 
-    async function submitOnboarding() {
-      const diet = [...document.querySelectorAll('input[name="diet"]:checked')]
-        .map(el => el.value).join(',');
-      // 可选数字项：没填就传 null，后端 calc_body_metrics 会因缺项而不可用（符合文档设计）
-      const num = id => document.getElementById(id).value ? Number(document.getElementById(id).value) : null;
-      const payload = {
-        off_work_start: document.getElementById('off_work_start').value,
-        off_work_end: document.getElementById('off_work_end').value,
-        overtime_freq: document.getElementById('overtime_freq').value,
-        commute_min: Number(document.getElementById('commute_min').value),
-        work_body_state: radioValue('work_body_state'),
-        cooking: radioValue('cooking'),
-        diet_restrictions: diet || null,
-        health_note: document.getElementById('health_note').value.trim() || null,
-        wake_time: document.getElementById('wake_time').value,
-        exercise_base: document.getElementById('exercise_base').value,
-        gender: document.getElementById('gender').value || null,
-        age: num('age'),
-        height_cm: num('height_cm'),
-        weight_kg: num('weight_kg'),
-        chronic_condition: document.getElementById('chronic_condition').value.trim() || null,
-        doctor_advice: document.getElementById('doctor_advice').value.trim() || null,
-        favorite_foods: [...document.querySelectorAll('input[name="fav"]:checked')]
-          .map(el => el.value).join(',') || null,
-      };
-      // 只保存档案（首夜建议由用户在主界面点「下班了」触发）
-      document.getElementById('submit-btn').disabled = true;
-      document.getElementById('msg').textContent = '';
-      document.getElementById('success-msg').style.display = 'none';
-      const res = await fetch('/api/onboarding', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify(payload),
+    /* ---------- 提交 ---------- */
+    let submitting = false;
+    async function submit(stay) {
+      if (submitting) return;
+      submitting = true;
+      try {
+        const res = await fetch('/api/onboarding', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify(buildPayload()),
+        });
+        if (!res.ok) { toast('保存失败，稍后再试一次'); return; }
+        if (stay) {
+          // 编辑态：明确反馈后回设置（修改资料不自动重出今晚建议）
+          toast('存好了');
+          setTimeout(leaveEdit, 700);
+          return;
+        }
+        // 首次走完：交给 app.html 按 /api/state 的 view 展示（rejected → 劝退屏，③-6）
+        location.href = 'app.html';
+      } catch (e) {
+        toast('连不上服务，稍后再试一次');
+      } finally {
+        submitting = false;
+      }
+    }
+
+    /* ---------- 步骤导航接线 ---------- */
+    document.querySelectorAll('[data-next]').forEach(b =>
+      b.addEventListener('click', () => show(STEPS[stepIdx + 1])));
+    document.querySelector('[data-finish]').addEventListener('click', () => submit(false));
+    document.querySelectorAll('[data-save]').forEach(b =>
+      b.addEventListener('click', () => submit(true)));
+
+    /* ---------- 启动 ---------- */
+    if (editMode) {
+      // 编辑态：「存好了」升为主按钮；「下一步」降为幽灵按钮留着（没带 sec 进来时也能走到别的步），
+      // 「走完了」与跳过链接藏掉（编辑态没有"跳过"语义）
+      document.querySelector('[data-finish]').hidden = true;
+      document.querySelectorAll('[data-next]').forEach(b => {
+        if (b.hasAttribute('data-skip')) { b.hidden = true; return; }
+        b.classList.remove('primary'); b.classList.add('ghost');
       });
-      document.getElementById('submit-btn').disabled = false;
-      if (!res.ok) {
-        document.getElementById('msg').textContent = '保存失败，请重试';
-        return;
-      }
-      const data = await res.json();
-      if (editMode || data.updated) {
-        // 明确告知保存成功，留在本页
-        document.getElementById('success-msg').style.display = 'block';
-        return;
-      }
-      location.href = 'app.html';
+      document.querySelectorAll('[data-save]').forEach(b => { b.hidden = false; b.style.order = '-1'; });
+      prefill().then(() => show(STEPS.includes(editSec) ? editSec : 'ob-1'));
+    } else {
+      setWheel('on', '09:00'); setWheel('off', '19:00'); setWheel('wake', '07:00');
+      renderWorkLen();
+      show('ob-1');
     }
   </script>
 </body>
