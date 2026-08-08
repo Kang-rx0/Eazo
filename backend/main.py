@@ -172,11 +172,12 @@ def _run_and_save_today(user_id: int, username: str, record=None,
         level = record["baseline_level"] if record["baseline_level"] is not None else 3
         conditions = json.loads(record["conditions_json"] or "{}")
 
-    # 输入侧安全检测（V2 三层架构入口）：当天全部自由输入 + 纠正项合并过 L1。
+    # 输入侧安全检测（V2 三层架构入口）：当天全部自由输入 + 纠正项 + 档案健康备注。
     # 当天说过的危险信号对当晚整晚有效——之后不管因为什么重新生成建议，都带着这个等级。
-    # （S2 在 assess 里加 L2 分类器；S3 补 health_note 与上下文注入）
+    # 健康备注只取慢性病词（"备注写了高血压 + 今晚想出汗"跨来源触发组合规则）。
     texts = db.get_free_inputs(user_id, clock.today()) + list(conditions.get("纠正", []))
-    safety_state = safety.assess(texts)
+    profile = db.get_profile(user_id)
+    safety_state = safety.assess(texts, health_note=profile["health_note"] if profile else None)
     if safety_state["final_level"] != "none" or safety_state["hits"]:
         conditions["安全"] = {"level": safety_state["final_level"],
                               "命中": safety_state["hits"], "L2": safety_state["l2"]}
@@ -398,12 +399,25 @@ async def api_agent_trace(request: Request):
         return {"trace": None}
     data = json.loads(files[-1].read_text(encoding="utf-8"))
     steps = [s for s in (_trace_step_label(r) for r in data.get("rounds", [])) if s]
+
+    # 安全层动作追加进 steps（V2 3.4：侧栏能展示"硬防线拦了什么"；none 且无命中时不加行）
+    sf = data.get("safety") or {}
+    if sf.get("L1命中"):
+        steps.append("安全层：词表命中 " + "、".join(sf["L1命中"]))
+    if sf.get("L2"):
+        steps.append(f"安全层：分类器判定 {sf['L2']['level']}（{sf['L2'].get('reason', '')}）")
+    if sf.get("等级") and sf["等级"] != "none":
+        steps.append(f"安全层：最终等级 {sf['等级']}，输出按安全模式强制执行")
+    for rw in sf.get("L3改写") or []:
+        steps.append(f"安全层：{rw}")
+
     return {
         "trace": {
             "virtual_time": data.get("virtual_time"),
             "steps": steps,
             "duration_s": data.get("duration_s"),
             "sources": (data.get("final") or {}).get("sources", []),
+            "safety": sf or None,
         }
     }
 

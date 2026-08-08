@@ -2,6 +2,7 @@
 #   S0：L1 扫描 / 等级合并只升不降 / enforce 骨架
 #   S1：L3 输出后校验——强制改写、话术拼接、数字校验、诊断断言过滤
 #   S2：L2 专职分类器——输出解析校验、失败/断网回退 L1、assess 三层串联（模型调用全部 mock）
+#   S3：【安全状态】上下文注入 + health_note 跨来源检测
 # 运行：/opt/miniconda3/envs/Eazo/bin/python scripts/test_safety.py
 import sys
 import unittest
@@ -412,6 +413,73 @@ class TestAssess(unittest.TestCase):
         with patch("backend.safety.llm.chat") as mock_chat:
             state = assess([])
         mock_chat.assert_not_called()
+        self.assertEqual(state["final_level"], "none")
+
+
+class TestS3ContextAndHealthNote(unittest.TestCase):
+    """S3：【安全状态】行生成 + health_note 跨来源检测。"""
+
+    def test_none不注入(self):
+        state = assess(["中午吃了黄焖鸡"]) if False else {"final_level": "none"}
+        self.assertIsNone(safety.context_line(state))
+
+    def test_danger注入(self):
+        line = safety.context_line({"final_level": "danger", "categories": ["acute"]})
+        self.assertIn("【安全状态】", line)
+        self.assertIn("danger", line)
+        self.assertIn("不要给出任何饮食或运动安排", line)
+
+    def test_chronic注入带病名(self):
+        line = safety.context_line({"final_level": "caution",
+                                    "categories": ["chronic_exercise"],
+                                    "chronic_words": ["高血压"]})
+        self.assertIn("高血压", line)
+        self.assertIn("不要给出任何运动安排", line)
+        self.assertIn("咨询医生", line)
+
+    def test_medication注入(self):
+        line = safety.context_line({"final_level": "caution", "categories": ["medication"]})
+        self.assertIn("不要回答任何药物问题", line)
+
+    def test_crisis注入(self):
+        line = safety.context_line({"final_level": "crisis", "categories": ["crisis"]})
+        self.assertIn("crisis", line)
+        self.assertIn("不要给出任何常规建议", line)
+
+    def test_caution通用注入(self):
+        line = safety.context_line({"final_level": "caution", "categories": ["acute"]})
+        self.assertIn("不要给出任何运动安排", line)
+
+    def test_健康备注慢性病_跨来源组合(self):
+        # S3 新能力：备注写了高血压，今晚输入只说想出汗（没提病）→ 组合规则照样触发
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"caution","category":"chronic_exercise","reason":"慢性病想运动"}')):
+            state = assess(["今晚想多动一动出出汗"], health_note="有高血压，医生说要注意")
+        self.assertEqual(state["final_level"], "caution")
+        self.assertIn("chronic_exercise", state["categories"])
+        self.assertIn("高血压", state["chronic_words"])
+
+    def test_健康备注慢性病_无文本不调L2不惊扰(self):
+        # 只有备注、今晚没说任何话 → 不调 L2（省调用），等级 none（慢性病提及不惊扰）
+        with patch("backend.safety.llm.chat") as mock_chat:
+            state = assess([], health_note="有高血压")
+        mock_chat.assert_not_called()
+        self.assertEqual(state["final_level"], "none")
+        self.assertIn("chronic_mention", state["categories"])
+
+    def test_健康备注急性软词不算今晚信号(self):
+        # 备注"腰不好，久坐容易疼"描述长期状态，"疼"不得作为今晚的急性候选
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"none","category":"none","reason":"正常"}')):
+            state = assess(["中午吃了黄焖鸡"], health_note="腰不好，久坐容易疼")
+        self.assertEqual(state["final_level"], "none")
+        self.assertNotIn("acute_soft", state["categories"])
+
+    def test_健康备注严重疾病词_S3暂不掺入(self):
+        # 备注里的严重疾病词留给 S4 劝退流程；S3 不因它进入 danger（避免无 UI 的突兀锁死）
+        with patch("backend.safety.llm.chat", return_value=_FakeMsg(
+                '{"level":"none","category":"none","reason":"正常"}')):
+            state = assess(["中午吃了黄焖鸡"], health_note="有心脏病")
         self.assertEqual(state["final_level"], "none")
 
 

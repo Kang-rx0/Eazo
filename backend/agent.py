@@ -26,6 +26,7 @@ SYSTEM_PROMPT = """你是一个「最低自我照顾」助手，服务对象是�
 6. 不评判用户已经吃的东西，只往前看。饮食禁忌是硬约束，绝不突破。
 7. 如果用户提到 疼/晕/胸口不适/喘不上气，不给任何活动建议，建议休息、必要时就医。
    如果用户明确表达精疲力尽（如"累死了""累瘫了""一点力气都没有"）或加班到很晚，主动撤掉运动安排（move 置 null），只保留吃什么和几点停——今晚能好好吃饭、按时睡觉就已经达标。
+   系统会在你之外做代码级安全检查，你的判断只会被它加严、不会被放宽；上下文若出现【安全状态】行，其中的限制必须无条件遵守。
 8. 涉及热量/蛋白质量级时，用 calc_body_metrics 工具取数，不要自己心算；数字只用来定量级和方向。
    本轮没调用该工具，就绝对不要在输出里出现任何 kcal/克数——宁可不提数字。
 9. 用户提到长期习惯或偏好（如"我习惯睡前喝杯热牛奶""我不爱吃香菜"），用 log_note 的 durable=true 记下来——它会永久保存，今后每天都会出现在【长期备注】里；今晚才有效的状态（累、加班、时间少）用 durable=false。
@@ -102,8 +103,9 @@ def _estimate_home_time(p) -> str:
         return "未知"
 
 
-def build_context(user_id: int, baseline_level: int, extra_conditions: list[str] | None = None) -> str:
-    """组装每次调用注入的上下文（文档 5.3）。"""
+def build_context(user_id: int, baseline_level: int, extra_conditions: list[str] | None = None,
+                  safety_state: dict | None = None) -> str:
+    """组装每次调用注入的上下文（文档 5.3；V2 3.5 追加【安全状态】行）。"""
     p = db.get_profile(user_id)
     history = tools.get_user_history(user_id, days=3)
     today = clock.today()
@@ -126,6 +128,11 @@ def build_context(user_id: int, baseline_level: int, extra_conditions: list[str]
         f"档位表 4={BASELINE_DESC[4]} / 3={BASELINE_DESC[3]} / 2={BASELINE_DESC[2]} / "
         f"1={BASELINE_DESC[1]} / 0={BASELINE_DESC[0]}）",
     ]
+    # 【安全状态】注入（V2 文档 3.5）：让模型第一时间就不朝错误方向写；none 时不加行
+    if safety_state:
+        safety_line = safety.context_line(safety_state)
+        if safety_line:
+            lines.append(safety_line)
     return "\n".join(lines)
 
 
@@ -195,7 +202,9 @@ def run_agent(user_id: int, username: str, baseline_level: int = 3,
     """
     start = time.perf_counter()
     notes: list[str] = []
-    context = build_context(user_id, baseline_level, extra_conditions)
+    if safety_state is None:
+        safety_state = safety.assess([])
+    context = build_context(user_id, baseline_level, extra_conditions, safety_state)
     messages = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + context}]
     trace = {"user": username, "virtual_time": clock.now_display(),
              "context": context, "rounds": [], "final": None, "duration_s": None}
@@ -272,8 +281,6 @@ def run_agent(user_id: int, username: str, baseline_level: int = 3,
 
     # L3 输出后校验（V2 安全边界）：按安全等级强制改写，兜底建议也不例外
     # （danger 时连兜底的"走 8 分钟"都必须撤——执行必须是代码，不依赖任何模型自觉）
-    if safety_state is None:
-        safety_state = safety.assess([])
     tools_called = [r["tool"] for r in trace["rounds"] if r.get("tool")]
     advice, rewrites = safety.enforce(advice, safety_state, tools_called)
     trace["safety"] = {"等级": safety_state["final_level"], "类别": safety_state.get("category"),

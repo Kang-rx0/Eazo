@@ -232,20 +232,30 @@ def safety_classify(text: str, l1_result: dict) -> dict | None:
         return None
 
 
-def assess(texts: list[str]) -> dict:
+def assess(texts: list[str], health_note: str | None = None) -> dict:
     """输入侧检测总入口：把一批用户文本（当天自由输入、纠正项等）合并扫描，产出 safety_state。
 
     流程（V2 三层架构的输入侧）：L1 词表扫描 → L2 分类器裁决 → merge 合并。
-    L2 的调用条件：有文本，且 L1 未锁 danger/crisis——已经锁死的等级 L2 动不了，
+    L2 的调用条件：有用户文本，且 L1 未锁 danger/crisis——已经锁死的等级 L2 动不了，
     省一次调用；其余情况都过 L2，既裁决软词候选（否定式降级），也兜住词表漏掉的
     说法（"撑不住了"类，L2 可加严）。L2 失败 → merge 自动退回 L1 保守结果。
+
+    health_note（档案健康备注，V2 文档 3.4）：只提取其中的慢性病词并入扫描——
+    这样"备注写了高血压 + 今晚输入想出汗"能跨来源触发组合规则；急性软词不取
+    （"腰不好容易疼"描述的是长期状态，不是今晚的急性信号，进不了红黄档）。
+    备注里的严重疾病词在 S4 的劝退流程里处理，这里不掺入。
     safety_state 是贯穿主流程的安全上下文，enforce/trace/日志都吃它。
     """
-    joined = "\n".join(t for t in texts if t and t.strip())
-    l1 = l1_scan(joined)
+    user_joined = "\n".join(t for t in texts if t and t.strip())
+    hn_chronic = _contains_any(health_note or "", rules.CHRONIC_WORDS)
+    scan_joined = user_joined
+    if hn_chronic:
+        scan_joined = (user_joined + "\n" if user_joined else "") \
+            + "（档案健康备注提及：" + "、".join(hn_chronic) + "）"
+    l1 = l1_scan(scan_joined)
     l2 = None
-    if joined and l1["locked_level"] not in ("danger", "crisis"):
-        l2 = safety_classify(joined, l1)
+    if user_joined and l1["locked_level"] not in ("danger", "crisis"):
+        l2 = safety_classify(scan_joined, l1)
     final = merge_levels(l1, l2["level"] if l2 else None)
 
     # 类别归属：L2 抬高了等级（超过 L1 锁定下界）就采用 L2 的类别，否则保持 L1；
@@ -260,6 +270,39 @@ def assess(texts: list[str]) -> dict:
     return {"final_level": final, "category": category,
             "categories": categories, "hits": l1["hits"],
             "chronic_words": l1["chronic_words"], "l1": l1, "l2": l2}
+
+
+def context_line(safety_state: dict) -> str | None:
+    """生成注入主 Agent 上下文的【安全状态】行（V2 文档 3.5）。
+
+    目的：让模型第一时间就不朝错误方向写（judgement 不再出现"可做轻度活动"这类
+    与撤掉的动作打架的文案），减少 L3 硬改写导致的生硬。执行仍以 L3 为准——
+    这行只是引导，不是防线。none 等级返回 None（正常路径上下文零变化）。
+    """
+    level = safety_state["final_level"]
+    if level == "none":
+        return None
+    if level == "crisis":
+        return ("【安全状态】L1/L2 判定为 crisis（心理危机）：不要给出任何常规建议，"
+                "只输出休息与关怀性的内容，不评判、不说教。")
+    if level == "danger":
+        return ("【安全状态】L1/L2 判定为 danger（急性危险信号）：不要给出任何饮食或"
+                "运动安排，judgement 只写休息；就医提醒系统会在你之外补充。")
+    # caution：按类别拼具体指令
+    cats = safety_state.get("categories") or []
+    parts = []
+    if "chronic_exercise" in cats:
+        disease = "、".join(safety_state.get("chronic_words") or []) or "慢性病"
+        parts.append(f"用户有{disease}且今晚想运动：不要给出任何运动安排，"
+                     f"judgement 和理由都不要出现运动量描述，引导先咨询医生")
+    if "medication" in cats:
+        parts.append("用户在咨询用药：不要回答任何药物问题、不要解释药物作用，"
+                     "引导咨询医生或药师")
+    if not parts:
+        parts.append("今晚出现过需要谨慎的身体信号：不要给出任何运动安排，建议保持保守")
+    return ("【安全状态】L1/L2 判定为 caution：" + "；".join(parts)
+            + "。（本行是系统内部状态，输出文案里不要出现'安全状态''L1/L2''判定'这类字样，"
+              "理由请用用户能懂的话直接说）")
 
 
 # ---- L3 固定话术（V2 文档五；后端拼接，永不指望模型写）----
