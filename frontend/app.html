@@ -373,7 +373,8 @@
     function hideToast() { document.getElementById('toast').removeAttribute('data-show'); }
 
     function setLoading(on) {
-      document.querySelectorAll('.foot .btn.primary').forEach(b => b.disabled = on);
+      // 安全出口也纳入禁用：生成中再点只会多一次无效往返（后端有锁，但别诱导双击）
+      document.querySelectorAll('.foot .btn.primary, .foot .safety').forEach(b => b.disabled = on);
       if (on) toast('正在想今晚怎么安排，大约十几秒…', true);
       else hideToast();
     }
@@ -463,6 +464,7 @@
       lastState = state;
       if (state.view === 'onboarding') { location.href = 'onboarding.html'; return; }
       paintClocks(state);
+      applySober(state);   // V3 P5：sober 映射（③-9）
       if (state.view === 'rejected') {
         document.getElementById('rejectedMsg').textContent = state.message || '';
         show('rejected');
@@ -667,6 +669,15 @@
       await refreshState();   // 用最新 state 统一渲染（时间带/回执行/时钟一起对齐）
     }
 
+    /* ---------- sober 映射（③-9）：crisis/danger → 整套灰阶+语音退场；
+       caution → 不进 sober（正常配色半退场，avoid/就医行可见）；rejected → 劝退屏 sober ---------- */
+    function applySober(state) {
+      const a = state.view === 'advice' ? state.today_advice : null;
+      const sober = state.view === 'rejected' ||
+        (a && (a.safety_level === 'danger' || a.safety_level === 'crisis'));
+      document.body.toggleAttribute('data-sober', !!sober);
+    }
+
     /* ---------- 结论屏渲染：字段一个不落（③-4 + ②-1~6 基础位） ---------- */
     function renderAdvice(a) {
       if (!a) return;
@@ -700,7 +711,13 @@
       const unsafe = a.safety_level && a.safety_level !== 'none';
       document.getElementById('btnHarder').hidden = !!unsafe;
       document.getElementById('btnSwitch').hidden = a.safety_level === 'crisis';
-      renderBand();
+      // V3 P5：crisis 整卡（②-5）——只有关怀语（judgement）+ 停 + 就医行，
+      // 时间带/理由行/trace 全部退场（后端已把内容换成定稿求助文案，前端走同一渲染）
+      const crisis = a.safety_level === 'crisis';
+      document.querySelector('#s-advice .srcs').hidden = crisis;
+      document.querySelector('#s-advice .acc').hidden = crisis;
+      if (crisis) document.getElementById('advBand').hidden = true;
+      else renderBand();
       // 理由行/trace 折叠回到默认收起
       document.querySelectorAll('#s-advice [data-acc]').forEach(b => b.setAttribute('aria-expanded', 'false'));
       document.getElementById('advWhy').hidden = true;
