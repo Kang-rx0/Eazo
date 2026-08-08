@@ -57,16 +57,25 @@ BASELINE_DESC = {
 }
 
 # 爱吃的食物类别 → 最轻的改法（PRD 原表）。软参考：顺着爱好改，不没收爱好。
+# V3 B5：类别改用队友原型定名（data-val 与库存值统一）；"最轻的改法"内容不变
 FAVORITE_FOOD_STRATEGIES = {
-    "粉面类": "少主食多配菜、汤别喝完（比如螺蛳粉就少粉多菜）",
+    "粉面": "少主食多配菜、汤别喝完（比如螺蛳粉就少粉多菜）",
     "炸物快餐": "去皮、别配含糖饮料（比如炸鸡少吃点皮）",
     "盖饭便当": "调整菜和饭的比例",
     "火锅麻辣烫": "选清汤、多涮青菜、蘸料别调太厚",
     "烧烤夜宵": "挪个时机、控住分量",
-    "甜品奶茶": "减糖/换无糖，当加餐别当正餐",
+    "甜品饮料": "减糖/换无糖，当加餐别当正餐",
     "轻食沙拉": "提醒别只有菜没蛋白",
-    "家常菜": "在现有习惯上给最轻的加法",
+    "自己做的家常": "在现有习惯上给最轻的加法",
 }
+# V3 B5：老库存量值（V2 旧名）归一化——老 demo/测试账号的档案不用改库也能继续注入
+FAVORITE_FOOD_ALIASES = {"粉面类": "粉面", "甜品奶茶": "甜品饮料", "家常菜": "自己做的家常"}
+
+
+def favorite_food_tips(fav: str) -> list[str]:
+    """把档案里逗号分隔的口味偏好转成"类别（最轻的改法）"清单；旧名先归一化，未知名忽略。"""
+    cats = [FAVORITE_FOOD_ALIASES.get(c.strip(), c.strip()) for c in (fav or "").split(",")]
+    return [f"{c}（{FAVORITE_FOOD_STRATEGIES[c]}）" for c in cats if c in FAVORITE_FOOD_STRATEGIES]
 
 # 兜底默认建议（文档 3.3：任何失败路径演示不死）
 FALLBACK_ADVICE = {
@@ -221,8 +230,7 @@ def build_context(user_id: int, baseline_level: int, extra_conditions: list[str]
     # 【口味偏好】注入（软参考，优先级最低）：带上每类的"最轻的改法"
     fav = (p["favorite_foods"] or "").strip() if "favorite_foods" in p.keys() else ""
     if fav:
-        tips = [f"{c}（{FAVORITE_FOOD_STRATEGIES[c]}）" for c in fav.split(",")
-                if c in FAVORITE_FOOD_STRATEGIES]
+        tips = favorite_food_tips(fav)   # V3 B5：新名直取、旧名归一化
         if tips:
             lines.append("【口味偏好】（软参考，优先级最低：医嘱、饮食禁忌、安全要求都高于它）"
                          "用户爱吃：" + "；".join(tips))

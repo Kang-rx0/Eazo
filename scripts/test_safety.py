@@ -684,6 +684,119 @@ class TestOffworkCalibrationB2(unittest.TestCase):
         self.assertEqual(set(store["校准"].keys()), {"time_budget_min", "energy", "body"})
 
 
+class TestSwitchPlanB3(unittest.TestCase):
+    """V3 B3：/api/correct「换一种做法」——类型合法性、注入行拼接（纯函数）、词表零命中。"""
+
+    def setUp(self):
+        from backend.main import CORRECT_TYPES, _switch_plan_line
+        self.types = CORRECT_TYPES
+        self.line = _switch_plan_line
+
+    def test_类型合法性(self):
+        self.assertIn("换一种做法", self.types)
+        # 旧类型一个不少（白名单加项不影响旧项）
+        for t in ("今晚更累", "时间更少", "不太舒服", "今天还行", "其实我做了",
+                  "难度再低一点", "难度再高一点"):
+            self.assertIn(t, self.types)
+
+    def test_上一版摘要拼接(self):
+        l = self.line({"eat": "清淡晚餐", "move": "走8分钟"})
+        self.assertIn("目标和量级保持不变", l)
+        self.assertIn("吃=清淡晚餐", l)
+        self.assertIn("动=走8分钟", l)
+        # eat/move 为 null 时对应段省略
+        l2 = self.line({"eat": "清淡晚餐", "move": None})
+        self.assertIn("吃=清淡晚餐", l2)
+        self.assertNotIn("动=", l2)
+        l3 = self.line({"eat": None, "move": None})
+        self.assertNotIn("（上一版：", l3)   # 双 null 时整个摘要括号段省略
+
+    def test_措辞词表零命中(self):
+        # 牵连检查 1：措辞不含运动意图词/软词，不会被组合规则拦
+        r = l1_scan("换一种做法")
+        self.assertEqual(r["hits"], [])
+        self.assertEqual(r["level"], "none")
+
+
+class TestHistoryB4(unittest.TestCase):
+    """V3 B4：/api/history 序列化（纯函数 _history_items，不碰库）。"""
+
+    def setUp(self):
+        from backend.main import _history_items
+        self.items = _history_items
+
+    def _rec(self, vday, feedback="完成了", **advice_kw):
+        advice = {"judgement": "今晚从简", "eat": "清淡晚餐", "move": "走8分钟",
+                  "stop": "23:00 放下手机"}
+        advice.update(advice_kw)
+        import json as _json
+        return {"vday": vday, "feedback": feedback,
+                "advice_json": _json.dumps(advice, ensure_ascii=False)}
+
+    def test_无记录空数组(self):
+        self.assertEqual(self.items([]), [])
+
+    def test_响应不含feedback(self):
+        # 输入行带着 feedback，输出体里任何位置都不许出现
+        out = self.items([self._rec("2026-08-01", feedback="完全没完成")])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(set(out[0].keys()), {"vday", "line", "items"})
+        import json as _json
+        self.assertNotIn("feedback", _json.dumps(out, ensure_ascii=False))
+        self.assertNotIn("完全没完成", _json.dumps(out, ensure_ascii=False))
+
+    def test_line取stop缺则judgement(self):
+        out = self.items([self._rec("2026-08-01")])
+        self.assertEqual(out[0]["line"], "23:00 放下手机")
+        out2 = self.items([self._rec("2026-08-01", stop=None)])
+        self.assertEqual(out2[0]["line"], "今晚从简")
+
+    def test_items只留非空(self):
+        out = self.items([self._rec("2026-08-01", move=None)])
+        self.assertEqual(out[0]["items"], ["清淡晚餐", "23:00 放下手机"])
+
+    def test_上限截断(self):
+        out = self.items([self._rec(f"2026-07-{i:02d}") for i in range(1, 32)] +
+                         [self._rec("2026-08-01")])
+        self.assertEqual(len(out), 30)
+
+
+class TestFavoriteFoodsB5(unittest.TestCase):
+    """V3 B5：口味偏好八类改队友定名 + 旧名归一化（agent.favorite_food_tips 纯函数）。"""
+
+    def setUp(self):
+        from backend.agent import FAVORITE_FOOD_STRATEGIES, favorite_food_tips
+        self.strategies = FAVORITE_FOOD_STRATEGIES
+        self.tips = favorite_food_tips
+
+    def test_八个新名齐全(self):
+        self.assertEqual(
+            set(self.strategies.keys()),
+            {"粉面", "炸物快餐", "盖饭便当", "火锅麻辣烫", "烧烤夜宵",
+             "甜品饮料", "轻食沙拉", "自己做的家常"})
+
+    def test_新名注入带策略(self):
+        tips = self.tips("粉面,甜品饮料")
+        self.assertEqual(len(tips), 2)
+        self.assertIn("少主食多配菜", tips[0])
+        self.assertIn("减糖/换无糖", tips[1])
+
+    def test_旧名归一化后同样注入(self):
+        # 老库存量值（V2 旧名）：粉面类/甜品奶茶/家常菜
+        tips = self.tips("粉面类,甜品奶茶,家常菜")
+        self.assertEqual(len(tips), 3)
+        self.assertIn("粉面（", tips[0])
+        self.assertIn("甜品饮料（", tips[1])
+        self.assertIn("自己做的家常（", tips[2])
+        # 追加验证 A 的存量组合：火锅麻辣烫没改名直取、甜品奶茶靠归一化
+        tips2 = self.tips("火锅麻辣烫,甜品奶茶")
+        self.assertEqual(len(tips2), 2)
+
+    def test_未知名忽略不炸(self):
+        self.assertEqual(self.tips("兰州拉面,粉面"), [f"粉面（{self.strategies['粉面']}）"])
+        self.assertEqual(self.tips(""), [])
+
+
 class TestConfirmHintB1(unittest.TestCase):
     """V3 B1：/api/state confirm_hint 的纯函数估算（agent.build_confirm_hint）。
     不写库、不调模型，全部用构造档案 + 固定 now 验证边界。"""

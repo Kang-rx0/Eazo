@@ -131,7 +131,22 @@ async def api_onboarding(payload: dict, request: Request):
 
 FEEDBACK_OPTIONS = ("完成了", "只完成一部分", "完全没完成", "建议仍然太难", "跳过")
 CORRECT_TYPES = ("今晚更累", "时间更少", "不太舒服", "今天还行", "其实我做了",
-                 "难度再低一点", "难度再高一点")   # 后两个是建议卡上的难度微调
+                 "难度再低一点", "难度再高一点",   # 难度微调（V2 追加）
+                 "换一种做法")                     # V3 B3：一次性条件，不写入纠正列表
+
+
+def _switch_plan_line(old_advice: dict) -> str:
+    """V3 B3：「换一种做法」的注入行（纯函数）。带上一版 eat/move 摘要让模型知道要避开什么；
+    eat/move 为 null 时省略对应段。"""
+    prev = []
+    if old_advice.get("eat"):
+        prev.append(f"吃={old_advice['eat']}")
+    if old_advice.get("move"):
+        prev.append(f"动={old_advice['move']}")
+    line = "用户希望换一种做法：目标和量级保持不变，给出与上一版不同的具体做法"
+    if prev:
+        line += f"（上一版：{'；'.join(prev)}）"
+    return line
 # 「下班了」时的状态自述选项（生成前先问一句，语义与一击纠正一致）
 OFFWORK_STATES = ("今晚更累", "时间更少", "不太舒服", "今天还行")
 
@@ -446,6 +461,17 @@ async def api_correct(payload: dict, request: Request):
         advice = _run_and_save_today(user_id, username, record=record, extra_conditions=extra)
         return {"advice": advice, "new_level": new_level}
 
+    # V3 B3：「换一种做法」＝一次性条件（参照难度微调的做法：不写入 conditions["纠正"]——
+    # 写入会让"换个做法"永久跟着每次重生成，方向漂移）。档位不变、不查封顶；
+    # 重生成结果照常全量过 enforce（danger/caution 下换出来的运动照样被撤）。
+    if ctype == "换一种做法":
+        conditions = json.loads(record["conditions_json"] or "{}")
+        extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
+        extra.append(_switch_plan_line(json.loads(record["advice_json"])))
+        advice = _run_and_save_today(user_id, username, record=dict(record),
+                                     extra_conditions=extra)
+        return {"advice": advice}
+
     # 「其实我做了」＝昨晚的回执报错了：把昨天记录改成「完成了」，档位跟着重算（B7）
     yesterday_updated = False
     record = dict(record)
@@ -677,6 +703,42 @@ async def api_clock(payload: dict):
     except (ValueError, TypeError) as e:
         return JSONResponse(status_code=400, content={"error": f"参数不合法：{e}"})
     return {"virtual_now": t.isoformat(), "display": clock.now_display()}
+
+
+# ---------- 历史回看（V3 B4） ----------
+
+_HISTORY_LIMIT = 30
+
+
+def _history_items(records, limit: int = _HISTORY_LIMIT) -> list[dict]:
+    """V3 B4：把有建议的记录序列化成回看列表（纯函数）。
+    硬规则（DESIGN.md Echo/History + PRD 原则五：不做成绩单）：
+    绝不包含 feedback、绝不包含连续天数统计——输入行里就算带了 feedback 也不出。"""
+    items = []
+    for r in records[:limit]:
+        advice = json.loads(r["advice_json"]) if r["advice_json"] else None
+        if not advice:
+            continue
+        line = advice.get("stop") or advice.get("judgement") or ""
+        items.append({
+            "vday": r["vday"],
+            "line": line,
+            "items": [advice[k] for k in ("eat", "move", "stop") if advice.get(k)],
+        })
+    return items
+
+
+@app.get("/api/history")
+async def api_history(request: Request):
+    """历史回看只读接口（V3 B4）：按用户倒序返回有建议的记录，上限 30 条。
+    不写库、不调模型；severe_flag 用户与其他接口口径一致返回 rejected。"""
+    user_id = _current_user_id(request)
+    if user_id is None:
+        return JSONResponse(status_code=401, content={"error": "未登录"})
+    p = db.get_profile(user_id)
+    if p is not None and p["severe_flag"]:
+        return {"rejected": True, "message": safety.SEVERE_NOTICE}
+    return {"history": _history_items(db.get_history_records(user_id, _HISTORY_LIMIT))}
 
 
 # ---------- 状态（文档 7.1） ----------

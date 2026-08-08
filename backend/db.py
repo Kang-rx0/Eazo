@@ -322,6 +322,21 @@ def get_last_records_before(user_id: int, vday: str, limit: int = 2):
         conn.close()
 
 
+def get_history_records(user_id: int, limit: int = 30):
+    """V3 B4：历史回看数据源——有建议的记录按日期倒序，只读。
+    只取 vday/advice_json 两列：feedback 从源头就不出库（响应里绝不含回执/成绩）。"""
+    conn = get_conn()
+    try:
+        return conn.execute(
+            "SELECT vday, advice_json FROM daily_records "
+            "WHERE user_id = ? AND advice_json IS NOT NULL "
+            "ORDER BY vday DESC, id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+
+
 def set_feedback(record_id: int, feedback: str) -> None:
     """写回执并结束该记录（四档或 跳过/未响应）。"""
     conn = get_conn()
