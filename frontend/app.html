@@ -261,26 +261,71 @@
       </div>
     </section>
 
-    <!-- ========== 临时设置屏（P6 重做外壳；先保住 我的资料/退出登录 两个出口） ========== -->
+    <!-- ========== 设置中心（P6）：原型演示夹具入口不进来；推送时间/顺延次数/停下提示
+         三项按 ③-11 隐藏（顺延已固定 30 分钟×2，不做假设置） ========== -->
     <section class="screen" id="s-settings">
       <div class="body">
         <h1>设置</h1>
         <p class="setgroup">关于你</p>
         <ul class="setlist">
           <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1'">
-            <span class="lab"><b>基本情况</b><s>作息、饮食、身体边界</s></span><span class="chev">›</span>
+            <span class="lab"><b>基本情况</b><s>作息、通勤、饮食、身体边界</s></span><span class="chev">›</span>
           </button></li>
           <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=pref'">
-            <span class="lab"><b>常吃的东西</b></span><span class="chev">›</span>
+            <span class="lab"><b>常吃的东西</b><s>顺着爱好给最轻的改法</s></span><span class="chev">›</span>
+          </button></li>
+        </ul>
+        <p class="setgroup">找你的时间</p>
+        <ul class="setlist">
+          <li><div class="setrow" style="cursor:default">
+            <span class="lab"><b>下班时找我</b><s>到点弹一条；说「还没」半小时后再问一次</s></span>
+            <button class="switch" type="button" id="reminderSwitch" role="switch" aria-checked="true" aria-label="下班时找我"></button>
+          </div></li>
+        </ul>
+        <p class="setgroup">回看</p>
+        <ul class="setlist">
+          <li><button class="setrow" type="button" id="historyEntry">
+            <span class="lab"><b>我收到过的建议</b></span><span class="chev">›</span>
           </button></li>
         </ul>
         <p class="setgroup">账号</p>
         <ul class="setlist">
           <li><button class="setrow" type="button" id="logoutBtn">
-            <span class="lab"><b>退出登录</b></span><span class="chev">›</span>
+            <span class="lab"><b>退出这台设备的登录</b><s>记录都在账号里，下次登录接着用</s></span><span class="chev">›</span>
           </button></li>
         </ul>
-        <p class="note">完整设置中心在整合后续步骤补齐。</p>
+        <p class="setgroup">关于</p>
+        <ul class="setlist">
+          <li><button class="setrow" type="button" id="aboutEntry">
+            <span class="lab"><b>值夜是什么</b></span><span class="chev">›</span>
+          </button></li>
+          <li><div class="setrow" style="cursor:default">
+            <span class="lab"><b>版本</b></span><span class="val">V3 整合版</span>
+          </div></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ========== 历史回看（B4 /api/history）：不显示做没做到、不显示连续天数 ========== -->
+    <section class="screen" id="s-history">
+      <div class="body">
+        <h1>我给过你<br>这些建议</h1>
+        <p class="sub">只记我给过什么，不记你做没做到——那部分只用来把下一条线放低，不做成一笔账。</p>
+        <ul class="setlist" id="historyList" hidden></ul>
+        <p class="note" id="historyEmpty" hidden>还没有记录。收到第一条建议之后，会出现在这里。</p>
+      </div>
+    </section>
+
+    <!-- ========== 关于：按真实行为写（③-2/12），不写"全存本机"这类不实描述 ========== -->
+    <section class="screen" id="s-about">
+      <div class="body">
+        <h1>值夜<br>是什么</h1>
+        <p class="setgroup">它会做什么</p>
+        <p class="sub">每晚按你的情况和当天状态，给一条足够小的安排——吃什么、动多久、几点停。你说一句就能改，做不完它把线放低，不记账。</p>
+        <p class="setgroup">它不做什么</p>
+        <p class="sub">不诊断、不开药、不替代医生。涉及身体不适时它会先停下建议就医；血压血糖这类数字它永远不给。也不做打卡、连续天数、成绩单。</p>
+        <p class="setgroup">数据在哪</p>
+        <p class="sub">档案和每晚的记录存在你的账号下（服务端），换台设备登录接着用。上传的食物照片会被识别用于饮食记录，可以随时删掉当条记录。</p>
       </div>
     </section>
 
@@ -386,7 +431,8 @@
     }
 
     /* ---------- 多屏骨架：返回箭头/齿轮按屏配置（齿轮只挂 Home） ---------- */
-    const BACK_TO = { 'confirm': 'home', 'settings': 'home' };   // 其余屏不给返回
+    const BACK_TO = { 'confirm': 'home', 'settings': 'home',
+                      'history': 'settings', 'about': 'settings' };   // 其余屏不给返回
     let activeScreen = 'home';
     function show(name) {
       activeScreen = name;
@@ -539,8 +585,10 @@
       localStorage.setItem('offworkReminder', JSON.stringify(rec));
       return rec;
     }
+    function reminderEnabled() { return localStorage.getItem('reminderOff') !== '1'; }
     function checkReminder(state) {
       const bar = document.getElementById('remindBar');
+      if (!reminderEnabled()) { bar.hidden = true; return; }   // P6：「下班时找我」开关（纯前端）
       if (!profile || !profile.off_work_end || state.view !== 'home' || state.today_advice) { bar.hidden = true; return; }
       const now = new Date(state.virtual_now);
       const [h, m] = profile.off_work_end.split(':').map(Number);
@@ -916,10 +964,55 @@
       if (activeScreen === 'home') { paintClocks(lastState); checkReminder(lastState); }
     }, 30000);
 
-    /* ---------- 退出登录 ---------- */
+    /* ---------- 设置中心（P6） ---------- */
     document.getElementById('logoutBtn').addEventListener('click', () => {
       localStorage.removeItem('token');
       location.href = 'index.html';
+    });
+    document.getElementById('aboutEntry').addEventListener('click', () => show('about'));
+    // 「下班时找我」开关：状态第二载体是滑块位置（DESIGN Switch 硬规则）
+    const remSwitch = document.getElementById('reminderSwitch');
+    remSwitch.setAttribute('aria-checked', String(reminderEnabled()));
+    remSwitch.addEventListener('click', () => {
+      const on = !reminderEnabled();
+      if (on) localStorage.removeItem('reminderOff');
+      else localStorage.setItem('reminderOff', '1');
+      remSwitch.setAttribute('aria-checked', String(on));
+      toast(on ? '好，到点我会来问一句' : '好，不来打扰了（这里随时能再开）');
+      if (lastState) checkReminder(lastState);
+    });
+    // 历史回看（B4）：每次进入现拉，只读
+    document.getElementById('historyEntry').addEventListener('click', async () => {
+      show('history');
+      const list = document.getElementById('historyList');
+      const empty = document.getElementById('historyEmpty');
+      list.hidden = true; empty.hidden = true;
+      const res = await fetch('/api/history', { headers: AUTH });
+      if (!res.ok) { empty.hidden = false; return; }
+      const data = await res.json();
+      const items = data.history || [];
+      if (!items.length) { empty.hidden = false; return; }
+      list.replaceChildren(...items.map(it => {
+        const li = document.createElement('li');
+        const row = document.createElement('div');
+        row.className = 'setrow'; row.style.cursor = 'default';
+        const lab = document.createElement('span');
+        lab.className = 'lab';
+        const b = document.createElement('b');
+        b.textContent = it.line;
+        b.style.cssText = 'display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        lab.appendChild(b);
+        if (it.items.length > 1) {
+          const s = document.createElement('s');
+          s.textContent = it.items.filter(x => x !== it.line).join('；').slice(0, 60);
+          lab.appendChild(s);
+        }
+        const val = document.createElement('span');
+        val.className = 'val'; val.textContent = it.vday.slice(5).replace('-', '/');
+        row.append(lab, val); li.appendChild(row);
+        return li;
+      }));
+      list.hidden = false;
     });
 
     /* ---------- 启动 ---------- */
