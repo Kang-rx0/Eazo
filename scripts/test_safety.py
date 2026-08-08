@@ -13,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend import safety  # noqa: E402
+from backend.agent import build_confirm_hint  # noqa: E402
 from backend.safety import assess, enforce, l1_scan, merge_levels  # noqa: E402
 
 
@@ -619,6 +620,87 @@ class TestS4ChronicTwoTier(unittest.TestCase):
                      safety.CHRONIC_DISCLAIMER_WITH_ADVICE):
             self.assertNotIn("{{", text)
             self.assertNotIn("热线", text)   # 用户确认：不提供任何求助热线
+
+
+class TestConfirmHintB1(unittest.TestCase):
+    """V3 B1：/api/state confirm_hint 的纯函数估算（agent.build_confirm_hint）。
+    不写库、不调模型，全部用构造档案 + 固定 now 验证边界。"""
+
+    def _p(self, **kw):
+        base = {"off_work_end": "19:00", "commute_min": 30, "wake_time": "07:00"}
+        base.update(kw)
+        return base
+
+    def _now(self, s):
+        from datetime import datetime
+        return datetime.fromisoformat(s)
+
+    def test_常规晚间(self):
+        # 22:00，已过下班点 → 到家=现在+30=22:30；睡点=07:00−7.5h=23:30；剩余 60
+        h = build_confirm_hint(self._p(), self._now("2026-08-09T22:00:00"), None, 3)
+        self.assertEqual(h["sleep_point"], "23:30")
+        self.assertEqual(h["home_eta"], "22:30")
+        self.assertEqual(h["remaining_min"], 60)
+        self.assertEqual(h["body"], "暂未确认")
+        self.assertIn("23:30", h["time_basis"])
+        self.assertIn("30 分钟通勤", h["time_basis"])
+
+    def test_未过下班点从下班点起算(self):
+        # 18:00 还没下班 → 到家=19:00+30=19:30（与提示词注入老口径一致）；剩余=23:30−19:30=240
+        h = build_confirm_hint(self._p(), self._now("2026-08-09T18:00:00"), None, 3)
+        self.assertEqual(h["home_eta"], "19:30")
+        self.assertEqual(h["remaining_min"], 240)
+
+    def test_跨零点睡点(self):
+        # 起床 08:30 → 睡点次日 01:00；now 22:00 → 到家 22:30 → 剩余 150
+        h = build_confirm_hint(self._p(wake_time="08:30"),
+                               self._now("2026-08-09T22:00:00"), None, 3)
+        self.assertEqual(h["sleep_point"], "01:00")
+        self.assertEqual(h["remaining_min"], 150)
+
+    def test_已过睡点剩余归零(self):
+        # now 23:45 已过 23:30 睡点 → 0，不出负数
+        h = build_confirm_hint(self._p(), self._now("2026-08-09T23:45:00"), None, 3)
+        self.assertEqual(h["remaining_min"], 0)
+
+    def test_零点后到家跨日不出负数(self):
+        # now 23:50 + 30 分钟通勤 → 到家次日 00:20；睡点已过 → 0（回归：跨日相减曾可能出巨大负值）
+        h = build_confirm_hint(self._p(), self._now("2026-08-09T23:50:00"), None, 3)
+        self.assertEqual(h["home_eta"], "00:20")
+        self.assertEqual(h["remaining_min"], 0)
+
+    def test_无起床时间默认2300睡点(self):
+        h = build_confirm_hint(self._p(wake_time=None),
+                               self._now("2026-08-09T22:00:00"), None, 3)
+        self.assertEqual(h["sleep_point"], "23:00")
+        self.assertEqual(h["remaining_min"], 30)
+
+    def test_无下班时间退化为现在加通勤(self):
+        h = build_confirm_hint(self._p(off_work_end=None),
+                               self._now("2026-08-09T22:00:00"), None, 3)
+        self.assertEqual(h["home_eta"], "22:30")
+
+    def test_精力_昨晚回执差(self):
+        for fb in ("完全没完成", "建议仍然太难", "未响应"):
+            h = build_confirm_hint(self._p(), self._now("2026-08-09T22:00:00"), fb, 3)
+            self.assertEqual(h["energy_guess"], "很低", fb)
+
+    def test_精力_档位低(self):
+        h = build_confirm_hint(self._p(), self._now("2026-08-09T22:00:00"), "完成了", 1)
+        self.assertEqual(h["energy_guess"], "很低")
+
+    def test_精力_默认还行(self):
+        for fb, level in ((None, 3), ("完成了", 3), ("只完成一部分", 4), ("跳过", 2)):
+            h = build_confirm_hint(self._p(), self._now("2026-08-09T22:00:00"), fb, level)
+            self.assertEqual(h["energy_guess"], "还行", f"{fb}/{level}")
+
+    def test_basis不出现内部术语(self):
+        # basis 是给用户看的：不得出现 档位/baseline/safety 等内部词
+        for fb, level in ((None, 3), ("完全没完成", 3), ("完成了", 1), ("未响应", 0)):
+            h = build_confirm_hint(self._p(), self._now("2026-08-09T22:00:00"), fb, level)
+            for word in ("档位", "baseline", "safety", "level"):
+                self.assertNotIn(word, h["energy_basis"])
+                self.assertNotIn(word, h["time_basis"])
 
 
 if __name__ == "__main__":

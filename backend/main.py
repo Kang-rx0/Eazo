@@ -630,6 +630,7 @@ async def api_state(request: Request):
         return {"view": "rejected", "message": safety.SEVERE_NOTICE,
                 "virtual_now": clock.now().isoformat(),
                 "virtual_now_display": clock.now_display(), "vday": clock.today()}
+    confirm_hint = None
     if state_profile is None:
         view = "onboarding"
         today_advice = None
@@ -652,6 +653,11 @@ async def api_state(request: Request):
                 "record_id": lf["id"], "vday": lf["vday"], "feedback": lf["feedback"],
                 "advice": json.loads(lf["advice_json"]) if lf["advice_json"] else None,
             }
+        # V3 B1：s-confirm 三行判断的数据源（view 为 home/advice 时附加；纯代码估算）
+        last_fb = last[0]["feedback"] if last else None
+        today_level = (record["baseline_level"] if record and record["baseline_level"] is not None
+                       else _compute_today_baseline(user_id))
+        confirm_hint = agent.build_confirm_hint(state_profile, clock.now(), last_fb, today_level)
     conn = db.get_conn()
     try:
         meals = conn.execute(
@@ -663,6 +669,7 @@ async def api_state(request: Request):
         conn.close()
     return {
         "view": view,
+        "confirm_hint": confirm_hint,
         "pending_feedback": pending_feedback,
         "yesterday_feedback": yesterday_feedback,
         "today_advice": today_advice,

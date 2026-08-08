@@ -108,14 +108,89 @@ def _fmt_profile(p) -> str:
     return "；".join(parts)
 
 
-def _estimate_home_time(p) -> str:
-    """按下班时间+通勤估算到家时间。"""
+def _estimate_home_time(p, now=None) -> str:
+    """按下班时间+通勤估算到家时间。
+    now 缺省 → 老口径：下班点 + 通勤（提示词【今天已知】注入用，行为不变）；
+    now 给定（V3 B1 confirm_hint）→ 已过下班点则改从 now 起算，其余口径一致。"""
     try:
         end = datetime.strptime(p["off_work_end"], "%H:%M")
+        if now is not None and now.strftime("%H:%M") > p["off_work_end"]:
+            end = end.replace(hour=now.hour, minute=now.minute)
         home = end + timedelta(minutes=p["commute_min"] or 0)
         return home.strftime("%H:%M")
     except (ValueError, TypeError):
         return "未知"
+
+
+# ---- V3 B1：s-confirm 三行判断的数据源（纯代码估算，不写库、不调模型） ----
+
+# 睡眠机会约 7.5 小时（450 分钟）：与提示词规则 3"约 7 小时以上睡眠机会"同口径，留半小时余量
+_SLEEP_OPPORTUNITY_MIN = 450
+# 档案没填起床时间时按 06:30 起床倒推 → 睡点 23:00，与提示词规则 3 的默认一致
+_DEFAULT_WAKE = "06:30"
+
+
+def build_confirm_hint(p, now, last_feedback: str | None, baseline_level: int) -> dict:
+    """给 /api/state 附加的 confirm_hint（V3 B1）：s-confirm「时间/精力/身体」三行判断的数据源。
+
+    纯代码计算，不写库、不调模型；一切时间来自虚拟时钟传入的 now。
+    - 睡点挂在"下一次起床"上倒推约 7.5h：天然处理跨零点（起床 08:30 → 睡点次日 01:00）
+      与"睡点已过"（now 已越过睡点 → remaining_min 归 0）；
+    - 到家与提示词注入共用 _estimate_home_time（已过下班点则从现在起算）；
+    - 精力只引用真实数据（昨晚回执、今日档位），不虚构"忙了12小时"这类说法；
+    - 身体后端判断不了，永远"暂未确认"，以用户说的为准。
+    """
+    # 睡点 = 下一次起床时间 − 7.5h
+    wake_str = p["wake_time"] or _DEFAULT_WAKE
+    try:
+        wake = datetime.strptime(wake_str, "%H:%M")
+    except (ValueError, TypeError):
+        wake = datetime.strptime(_DEFAULT_WAKE, "%H:%M")
+    wake_dt = now.replace(hour=wake.hour, minute=wake.minute, second=0, microsecond=0)
+    if wake_dt <= now:
+        wake_dt += timedelta(days=1)
+    sleep_dt = wake_dt - timedelta(minutes=_SLEEP_OPPORTUNITY_MIN)
+    sleep_point = sleep_dt.strftime("%H:%M")
+
+    # 到家：与提示词注入同一函数保证口径一致；"未知"（档案缺下班时间）退化为 现在+通勤
+    commute = p["commute_min"] or 0
+    eta_str = _estimate_home_time(p, now=now)
+    if eta_str == "未知":
+        eta_dt = now + timedelta(minutes=commute)
+        eta_str = eta_dt.strftime("%H:%M")
+    else:
+        h, m = map(int, eta_str.split(":"))
+        eta_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if eta_dt < now:
+            eta_dt += timedelta(days=1)   # 23:50 从现在起算 + 30 分钟通勤 → 次日 00:20
+
+    remaining = int(max(0, (sleep_dt - max(now, eta_dt)).total_seconds() // 60))
+
+    # 精力预估：昨晚回执差/没回音 或 今日档位≤1 → 很低；basis 只说真实发生过的事
+    if last_feedback in ("完全没完成", "建议仍然太难"):
+        energy, energy_basis = "很低", "昨晚那条没做完，今晚先按省力的来"
+    elif last_feedback == "未响应":
+        energy, energy_basis = "很低", "昨晚没等到回音，今晚先按省力的来"
+    elif baseline_level <= 1:
+        energy, energy_basis = "很低", "最近几晚的安排已经压得很低，今晚先按省力的来"
+    elif last_feedback == "完成了":
+        energy, energy_basis = "还行", "昨晚完成得不错，按还行预估"
+    elif last_feedback == "只完成一部分":
+        energy, energy_basis = "还行", "昨晚完成了一部分，按还行预估"
+    elif last_feedback == "跳过":
+        energy, energy_basis = "还行", "昨晚你选了跳过，先按还行预估"
+    else:
+        energy, energy_basis = "还行", "暂无可参考的记录，先按还行预估"
+
+    return {
+        "sleep_point": sleep_point,
+        "home_eta": eta_str,
+        "remaining_min": remaining,
+        "time_basis": f"按 {sleep_point} 的睡点和 {commute} 分钟通勤倒着算的",
+        "energy_guess": energy,
+        "energy_basis": energy_basis,
+        "body": "暂未确认",
+    }
 
 
 def build_context(user_id: int, baseline_level: int, extra_conditions: list[str] | None = None,
