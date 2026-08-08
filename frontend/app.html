@@ -2,200 +2,380 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>主界面</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>值夜</title>
+  <link rel="stylesheet" href="nightwatch.css">
   <style>
-    /* 只保证结构清晰、按钮能点，精致 UI 由队友负责 */
-    body { max-width: 640px; margin: 0 auto; padding: 16px; }
-    #offwork-btn { font-size: 22px; padding: 18px 48px; }
-    .card { border: 1px solid #ccc; border-radius: 10px; padding: 16px; margin: 12px 0; }
-    .small-btns button { margin: 4px 6px 4px 0; }
-    #clock-bar {
-      position: fixed; right: 12px; bottom: 12px;
-      background: rgba(0, 0, 0, 0.6); color: #fff;
-      padding: 8px 12px; border-radius: 8px; font-size: 13px;
+    /* 本页专属的少量补充：提醒条卡片 + 回执快捷行 + 安全渲染基础位（P5 收口视觉） */
+    .remindbar{
+      margin:16px 0 0; padding:13px 15px;
+      border:1.5px solid var(--line-2); border-radius:var(--r); background:var(--ink-2);
     }
-    #clock-bar button { margin-left: 6px; }
-    #loading { color: #666; }
-    #toast {
-      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
-      background: #2a7; color: #fff; padding: 8px 18px; border-radius: 8px;
-      font-size: 14px; display: none; z-index: 10; max-width: 90%;
+    .remindbar p{margin:0 0 9px; font-size:14.5px; line-height:1.5; font-weight:600}
+    .remindbar .minor{margin:0}
+    .recall .minor{margin-top:8px}
+    .recall .textlink{display:block; margin:0 auto; min-height:36px; padding:6px 14px}
+    /* 安全渲染五件套的基础容器（②-1~5；空则隐藏。P5 做 sober 与细化） */
+    .avoidbox{
+      margin:16px 0 0; padding:12px 14px;
+      border:1.5px solid var(--line); border-radius:var(--r); background:var(--ink-2);
     }
-    #toast.err { background: #c33; }
+    .avoidbox p{margin:0 0 6px; font-size:13.5px; line-height:1.5; font-weight:600; color:var(--text)}
+    .avoidbox ul{margin:0; padding-left:18px}
+    .avoidbox li{font-size:13.5px; line-height:1.6; font-weight:400; color:var(--muted)}
+    .docline{margin:12px 0 0; font-size:14.5px; line-height:1.6; font-weight:600}
+    .bandlabel span{white-space:nowrap}
+    .bandlabel span:last-child{text-align:right}
+    .homepanel .textlink{min-height:36px; padding:6px 8px}
+    #photoMsg{margin:8px 0 0; padding:0; border:0}
   </style>
 </head>
 <body>
-  <!-- 操作结果提示：所有修改/保存/确认成功后都在这里明确告知 -->
-  <div id="toast"></div>
-
-  <h1>今晚</h1>
-
-  <!-- V2：下班提醒条（到设定下班点弹出；「还没」半小时后再问一次，再没有就不问了） -->
-  <div id="offwork-reminder" style="display:none; padding:8px 12px; background:#fff8e6; border:1px solid #e6d9a8; margin-bottom:12px;">
-    到点了，下班了吗？
-    <button onclick="reminderYes()">下班了</button>
-    <button onclick="reminderNo()">还没</button>
-  </div>
-
-  <!-- home 视图：大按钮「下班了」（文档 3.2） -->
-  <div id="home-view" style="display:none;">
-    <p><button id="offwork-btn" onclick="offwork()">下班了</button></p>
-  </div>
-
-  <!-- V2：生成前先问一句今晚状态（选完再生成；语义与一击纠正一致） -->
-  <div id="state-view" style="display:none;" class="card">
-    <h2>今晚状态怎么样？</h2>
-    <div class="small-btns">
-      <button onclick="pickState('今天还行')">今天还行</button>
-      <button onclick="pickState('今晚更累')">今晚更累</button>
-      <button onclick="pickState('时间更少')">时间更少</button>
-      <button onclick="pickState('不太舒服')">不太舒服</button>
-    </div>
-    <p style="font-size:12px;"><a href="javascript:void(0)" onclick="pickState(null)">跳过，直接生成</a></p>
-  </div>
-
-  <!-- 回执视图：第二天点「下班了」先收昨晚回执（文档 7.2） -->
-  <div id="feedback-view" style="display:none;" class="card">
-    <h2 id="fb-question"></h2>
-    <div class="small-btns">
-      <button onclick="sendFeedback('完成了')">完成了</button>
-      <button onclick="sendFeedback('只完成一部分')">只完成一部分</button>
-      <button onclick="sendFeedback('完全没完成')">完全没完成</button>
-      <button onclick="sendFeedback('建议仍然太难')">建议仍然太难</button>
-      <button onclick="sendFeedback('跳过')">跳过</button>
-    </div>
-  </div>
-
-  <!-- advice 视图：建议卡片 + 接受 + 一击纠正（文档 3.2 / 7.2） -->
-  <div id="advice-view" style="display:none;">
-    <!-- 昨晚回执可改（点错了后悔的回退入口） -->
-    <p id="yesterday-line" style="display:none; font-size:13px; color:#666;">
-      昨晚记为：<span id="yesterday-fb"></span>
-      <a href="javascript:void(0)" onclick="reopenFeedback()">点错了？改</a>
-    </p>
-    <div class="card">
-      <h2>今晚的最低线</h2>
-      <p><strong id="adv-judgement"></strong></p>
-      <p id="adv-reason" style="color:#666;"></p>
-      <ul>
-        <li id="adv-eat"></li>
-        <li id="adv-move"></li>
-        <li id="adv-stop"></li>
-      </ul>
-      <!-- V2 安全模式：不建议做什么 + 就医提醒（语气温和，不是红色警报） -->
-      <div id="adv-avoid-wrap" style="display:none;">
-        <p style="margin:4px 0; color:#8a6d3b;">今晚先不：</p>
-        <ul id="adv-avoid-list" style="color:#8a6d3b; margin-top:0;"></ul>
+  <header class="topbar">
+    <button class="navicon back" type="button" id="navBack" aria-label="返回" hidden>
+      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="badge">
+      <div class="face" id="face" data-mood="happy" aria-hidden="true"><i class="l"></i><i class="r"></i><u></u></div>
+      <div>
+        <b>值夜</b>
+        <s>今晚值班</s>
       </div>
-      <p id="adv-see-doctor" style="display:none; color:#a05252;"></p>
-      <p id="adv-severe-notice" style="display:none; color:#a05252;"></p>
-      <p id="adv-disclaimer" style="display:none; font-size:12px; color:#999;"></p>
-      <p id="adv-sources" style="font-size:12px; color:#999;"></p>
-      <p><button onclick="accept()">就这样</button> <span id="accept-msg" style="color:#2a7;"></span></p>
     </div>
-    <!-- Agent 过程可视化（文档 9.4，演示加分项）：折叠面板展示工具调用轨迹 -->
-    <details id="trace-panel" style="font-size:13px; color:#666; margin:8px 0;">
-      <summary>它是怎么得出这个建议的</summary>
-      <ol id="trace-steps"></ol>
-      <p id="trace-meta" style="font-size:12px; color:#999;"></p>
-    </details>
-    <div class="small-btns">
-      不对？一击纠正：
-      <button onclick="correct('今晚更累')">今晚更累</button>
-      <button onclick="correct('时间更少')">时间更少</button>
-      <button onclick="correct('不太舒服')">不太舒服</button>
-      <button onclick="correct('今天还行')">今天还行</button>
-      <button onclick="correct('其实我做了')">其实我做了</button>
+    <button class="navicon gear" type="button" id="navGear" aria-label="设置" hidden>
+      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="5" cy="10" r="1.5" fill="currentColor"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/><circle cx="15" cy="10" r="1.5" fill="currentColor"/></svg>
+    </button>
+  </header>
+
+  <main class="screens">
+
+    <!-- ========== Home ========== -->
+    <section class="screen" id="s-home">
+      <div class="body">
+        <p class="clock" id="homeClock">--:--</p>
+        <p class="tag" id="homeGreeting">晚上好</p>
+        <h1>我们<br>又碰面了</h1>
+
+        <!-- 下班提醒条（②-19）：逻辑照搬旧版（localStorage + 30s 轮询虚拟时钟），视觉融入 -->
+        <div class="remindbar" id="remindBar" hidden>
+          <p>到点了，下班了吗？</p>
+          <div class="minor">
+            <button class="btn" type="button" id="remindYes">下班了</button>
+            <button class="btn" type="button" id="remindNo">还没</button>
+          </div>
+        </div>
+
+        <!-- 昨晚回执状态行（②-21）：已答过时显示，可改 -->
+        <p class="note" id="yesterdayLine" hidden>
+          昨晚记为「<span id="yesterdayFb"></span>」
+          <button class="textlink" type="button" id="yesterdayEdit" style="min-height:32px;padding:4px 8px">点错了？改</button>
+        </p>
+
+        <!-- 回顾卡（②-20）：不在 Home 常驻（③-8），offwork 返回 need_feedback 或点「点错了？改」时出现。
+             显示队友文案，值用后端四档+跳过 -->
+        <div class="recall" id="recallCard" hidden>
+          <p id="recallQuestion">昨晚那条，做到了吗</p>
+          <div class="opts">
+            <button class="opt" type="button" data-fb="完成了">做到了</button>
+            <button class="opt" type="button" data-fb="只完成一部分">做了点</button>
+            <button class="opt" type="button" data-fb="完全没完成">没顾上</button>
+          </div>
+          <div class="minor">
+            <button class="btn" type="button" data-fb="建议仍然太难">建议仍然太难</button>
+          </div>
+          <button class="textlink" type="button" data-fb="跳过">跳过</button>
+        </div>
+
+        <!-- 树洞 / 食记（②-22/23）：两格入口 + 气泡面板 -->
+        <div class="homelist">
+          <div class="homepanel" id="accFreeHome" hidden data-bubble="free">
+            <div class="inline-row">
+              <textarea class="field" id="freeTextHome" rows="1"
+                        placeholder="比如：没吃午饭 / 明早早起"
+                        aria-label="树洞：说说今天"></textarea>
+              <button class="textlink" type="button" id="freeSendHome" style="align-self:center">说给它</button>
+            </div>
+          </div>
+          <div class="homepanel" id="accPhotoHome" hidden data-bubble="meal">
+            <p class="note" id="photoPrompt">拍下今天吃的，晚餐建议更贴近你</p>
+            <button class="textlink" type="button" id="photoPick">添加照片</button>
+            <input type="file" accept="image/*" id="photoInput" hidden>
+          </div>
+          <!-- 拍照回执独立一行：确认句 + 「记错了？删除」（③-15 单张） -->
+          <div class="homepanel" id="photoReceipt" hidden data-bubble="meal">
+            <p class="note" id="photoMsg"></p>
+            <button class="textlink" type="button" id="photoDelete">记错了？删除</button>
+          </div>
+          <div class="homegrid">
+            <button class="homecell" type="button" aria-expanded="false" data-panel="accFreeHome">
+              <span class="homecell-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 4.5h13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H9l-3 3v-3H3.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.8 8h8.4M5.8 10.7h5.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+              <span class="homecell-text">树洞</span>
+            </button>
+            <button class="homecell" type="button" aria-expanded="false" data-panel="accPhotoHome">
+              <span class="homecell-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.2 5.5 8 4h4l.8 1.5H16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.5"/></svg></span>
+              <span class="homecell-text">食记</span>
+            </button>
+          </div>
+        </div>
+        <p class="voice">今晚，留一件小事给自己。</p>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" id="startBtn">开始今晚</button>
+        <button class="safety" type="button" data-safety-exit>身体不舒服</button>
+      </div>
+    </section>
+
+    <!-- ========== s-confirm：三行判断（③-7 决策，数据源 = B1 confirm_hint） ========== -->
+    <section class="screen" id="s-confirm">
+      <div class="body">
+        <p class="clock" id="confirmClock">--:--</p>
+        <p class="tag">初步判断</p>
+        <h1 id="confirmTitle">先对一下<br>今晚的判断</h1>
+
+        <dl class="rows">
+          <div class="row"><dt>剩余时间</dt><dd><span id="chTime">--</span><i>估</i></dd></div>
+          <div class="rowsrc">
+            <p id="chTimeBasis"></p>
+            <button class="textlink" type="button" data-adjust>改一下</button>
+          </div>
+
+          <div class="row"><dt>当前精力</dt><dd><span id="chEnergy">--</span><i>估</i></dd></div>
+          <div class="rowsrc">
+            <p id="chEnergyBasis"></p>
+            <button class="textlink" type="button" data-adjust>改一下</button>
+          </div>
+
+          <div class="row"><dt>身体状况</dt><dd><span id="chBody">暂未确认</span></dd></div>
+          <div class="rowsrc">
+            <p>这项我判断不了，按你说的算</p>
+            <button class="textlink" type="button" data-adjust>改一下</button>
+          </div>
+        </dl>
+        <p class="voice">都是我估的，不对就改。</p>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" id="confirmOk">判断大致没错</button>
+        <button class="btn ghost" type="button" data-note-open>我要补充</button>
+        <button class="safety" type="button" data-safety-exit>身体不舒服</button>
+      </div>
+    </section>
+
+    <!-- ========== 结论屏：渲染后端 advice JSON（③-4），维度可缺席 ========== -->
+    <section class="screen" id="s-advice">
+      <div class="body">
+        <p class="clock" id="adviceClock">--:--</p>
+        <p class="note" id="adviceYesterday" hidden style="margin-top:6px"></p>
+        <h1 id="advJudgement"></h1>
+
+        <!-- 时间带（③-13）：睡点=confirm_hint.sleep_point、通勤=档案；解析不出整条隐藏；
+             「今晚需要你花的时间」按计划删除 -->
+        <div class="band" id="advBand" hidden>
+          <p class="bandscale"><span id="bandNow">--:--</span><span id="bandEnd">--:-- 睡点</span></p>
+          <div class="bandtrack" role="img" aria-label="今晚时间分配">
+            <div class="seg" data-seg="spent" id="segSpent"></div>
+            <div class="seg" data-seg="free" id="segFree"></div>
+          </div>
+          <p class="bandlabel">
+            <span id="labSpent"></span><span id="labFree"></span>
+          </p>
+        </div>
+
+        <ol class="plan" id="planList">
+          <li id="planEat" hidden><b></b><span></span></li>
+          <li id="planMove" hidden><b></b><span></span></li>
+          <li id="planStop" data-key hidden><b></b><span></span></li>
+        </ol>
+
+        <!-- 安全渲染基础位（②-1~5，P5 收口视觉与 sober）：空字段隐藏（②-6） -->
+        <div class="avoidbox" id="advAvoid" hidden>
+          <p>今晚先不：</p>
+          <ul id="advAvoidList"></ul>
+        </div>
+        <p class="docline" id="advSeeDoctor" hidden></p>
+        <p class="docline" id="advSevereNotice" hidden></p>
+
+        <p class="voice" id="adviceVoice">不合适就说，我来改。</p>
+
+        <!-- 理由行（source-row，默认收起）：reason + sources -->
+        <div class="srcs">
+          <button type="button" aria-expanded="false" data-acc="advWhy">为什么是这条线</button>
+          <dl id="advWhy" hidden>
+            <div><dt>依据</dt><dd id="advReason"></dd></div>
+            <div id="advSourcesRow" hidden><dt>来源</dt><dd id="advSources"></dd></div>
+          </dl>
+        </div>
+
+        <!-- trace（②-24）：渲染 /api/agent_trace steps，安全层行天然带出 -->
+        <div class="acc">
+          <button type="button" aria-expanded="false" data-acc="tracePanel">它是怎么得出这个建议的</button>
+          <ul id="tracePanel" hidden></ul>
+        </div>
+
+        <p class="note" id="advDisclaimer" hidden></p>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" id="acceptBtn">就这样</button>
+        <button class="btn ghost" type="button" data-note-open>我要补充</button>
+        <button class="safety" type="button" data-safety-exit>身体不舒服</button>
+      </div>
+    </section>
+
+    <!-- ========== 印章屏（①-8/③-17）：不写任何本地历史 ========== -->
+    <section class="screen" id="s-accepted">
+      <div class="body">
+        <p class="clock" id="acceptedClock">--:--</p>
+        <div class="stamp">
+          <em>今晚已记下</em>
+          <h1 id="stampLine"></h1>
+          <p>别的今晚都不算数。</p>
+        </div>
+        <p class="voice">有变化随时回来改，不用回我。</p>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" id="acceptedBack">好，先这样</button>
+      </div>
+    </section>
+
+    <!-- ========== s-bye（③-16 配套）：纯前端，不调接口、不记录 ========== -->
+    <section class="screen" id="s-bye">
+      <div class="body">
+        <p class="clock" id="byeClock">--:--</p>
+        <p class="tag">今晚不安排</p>
+        <h1>行，收了</h1>
+        <p class="voice">不问原因。我下次再来。</p>
+      </div>
+      <div class="foot">
+        <button class="btn ghost" type="button" id="byeBack">回到首页</button>
+      </div>
+    </section>
+
+    <!-- ========== 劝退视图（P5 做 sober 收口，本步保证链路与定稿文案） ========== -->
+    <section class="screen" id="s-rejected">
+      <div class="body">
+        <p class="tag">这一类我不接</p>
+        <h1>先交给<br>专业人士</h1>
+        <p class="sub" id="rejectedMsg"></p>
+      </div>
+      <div class="foot">
+        <button class="btn primary" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-4'">改一下刚才那项</button>
+      </div>
+    </section>
+
+    <!-- ========== 临时设置屏（P6 重做外壳；先保住 我的资料/退出登录 两个出口） ========== -->
+    <section class="screen" id="s-settings">
+      <div class="body">
+        <h1>设置</h1>
+        <p class="setgroup">关于你</p>
+        <ul class="setlist">
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1'">
+            <span class="lab"><b>基本情况</b><s>作息、饮食、身体边界</s></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=pref'">
+            <span class="lab"><b>常吃的东西</b></span><span class="chev">›</span>
+          </button></li>
+        </ul>
+        <p class="setgroup">账号</p>
+        <ul class="setlist">
+          <li><button class="setrow" type="button" id="logoutBtn">
+            <span class="lab"><b>退出登录</b></span><span class="chev">›</span>
+          </button></li>
+        </ul>
+        <p class="note">完整设置中心在整合后续步骤补齐。</p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 虚拟时钟控制条（②-25）：演示道具，常驻 -->
+  <div class="clockbar" id="clockBar">
+    <b id="clockDisplay">加载中…</b>
+    <button type="button" data-clock='{"advance_hours":1}'>+1小时</button>
+    <button type="button" data-clock='{"advance_days":1}'>下一天</button>
+    <button type="button" data-clock='{"reset":true}'>重置</button>
+  </div>
+
+  <!-- 抽屉：我要补充 / 改一下（共用遮罩） -->
+  <div class="calibration-scrim" id="sheetScrim" hidden></div>
+  <section class="calibration-sheet" id="noteSheet" role="dialog" aria-modal="true" hidden>
+    <h2>我要补充</h2>
+    <p>说一句，我按今晚的新情况重新安排。</p>
+    <div class="calgroup">
+      <p>补充一句</p>
+      <div class="inline-row">
+        <textarea class="field" id="noteText" rows="2"
+                  placeholder="比如：还要加班两小时 / 刚吃完火锅 / 明早要早起"
+                  aria-label="补充一句"></textarea>
+      </div>
+      <button class="btn primary" type="button" id="noteSubmit">提交并重新安排</button>
     </div>
-    <!-- V2：难度微调（安全模式下不显示「加一点」——运动本来就被撤了） -->
-    <div class="small-btns" style="margin-top:4px;">
-      难度：
-      <button onclick="correct('难度再低一点')">再轻一点</button>
-      <button id="harder-btn" onclick="correct('难度再高一点')">再加一点</button>
+    <div class="calgroup" id="noteActionsGroup">
+      <p>换个做法</p>
+      <div class="minor">
+        <button class="btn" type="button" data-correct="换一种做法" id="btnSwitch">换一种做法</button>
+        <button class="btn" type="button" data-correct="难度再低一点">再轻一点</button>
+        <button class="btn" type="button" data-correct="难度再高一点" id="btnHarder">再加一点</button>
+      </div>
+      <div class="minor" style="margin-top:8px">
+        <button class="btn" type="button" data-correct="其实我做了">其实昨晚我做了</button>
+      </div>
     </div>
-  </div>
+    <button class="textlink" type="button" id="noteBye" style="display:block;margin:10px auto 0">今天不做</button>
+  </section>
 
-  <!-- V2 S4：严重疾病温和劝退视图（语气抱歉而非拒斥，保留改资料的出口） -->
-  <div id="rejected-view" style="display:none;" class="card">
-    <h2>抱歉，这里帮不上你</h2>
-    <p id="rejected-msg"></p>
-    <p style="font-size:13px; color:#666;">
-      如果是选错了或情况有变，可以去<a href="onboarding.html?edit=1&sec=ob-4">我的资料</a>里修改。
-    </p>
-  </div>
+  <section class="calibration-sheet" id="adjustSheet" role="dialog" aria-modal="true" hidden>
+    <h2>改一下</h2>
+    <p>这几项不对就改，我按新的重新算。</p>
+    <div class="calgroup">
+      <p>今晚还剩多久</p>
+      <div class="wheel calibration-time-wheel"><div class="wheeltrack" id="calTimeWheel" role="listbox" tabindex="0" aria-label="今晚剩余时间"></div></div>
+    </div>
+    <div class="calgroup">
+      <p>现在的精力</p>
+      <div class="calchips" role="group" aria-label="当前精力">
+        <button class="chip" type="button" data-cal="energy" data-val="几乎没有">几乎没有</button>
+        <button class="chip" type="button" data-cal="energy" data-val="很低">很低</button>
+        <button class="chip" type="button" data-cal="energy" data-val="还行">还行</button>
+      </div>
+    </div>
+    <div class="calgroup">
+      <p>身体状况</p>
+      <div class="calchips" role="group" aria-label="身体状况">
+        <button class="chip" type="button" data-cal="body" data-val="没有明显不适">没有明显不适</button>
+        <button class="chip" type="button" data-cal="body" data-val="有明显不适">有明显不适</button>
+      </div>
+    </div>
+    <button class="btn primary" type="button" id="calSave">按这个重新算</button>
+  </section>
 
-  <!-- 补充一句 / 拍一下（文档 3.2 / 7.3；不做成首屏主角） -->
-  <div id="input-bar" style="display:none; margin-top:16px;">
-    <input id="free-text" placeholder="补充一句：加班了 / 中午吃了什么…" size="36">
-    <button onclick="sendFreeInput()">发送</button>
-    <label style="margin-left:8px; cursor:pointer; text-decoration:underline;">
-      拍一下<input id="meal-photo" type="file" accept="image/*" style="display:none;" onchange="uploadMealPhoto()">
-    </label>
-    <div id="input-msg" style="color:#2a7;"></div>
-  </div>
-
-  <p id="loading" style="display:none;">正在想今晚怎么安排，大约十几秒…</p>
-  <p style="margin-top:24px;">
-    <a href="onboarding.html?edit=1">我的资料</a> ·
-    <a href="index.html" onclick="localStorage.removeItem('token')">退出登录</a>
-  </p>
-
-  <!-- 演示控制条（文档第八节） -->
-  <div id="clock-bar">
-    <span id="clock-display">加载中…</span>
-    <button onclick="changeClock({advance_hours: 1})">+1小时</button>
-    <button onclick="changeClock({advance_days: 1})">下一天</button>
-    <button onclick="changeClock({reset: true})">重置</button>
-  </div>
+  <p class="toast" id="toast" role="status"></p>
 
   <script>
     const token = localStorage.getItem('token');
     if (!token) location.href = 'auth.html';
     const AUTH = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
 
-    function show(viewId) {
-      for (const id of ['home-view', 'feedback-view', 'advice-view', 'rejected-view', 'state-view']) {
-        document.getElementById(id).style.display = id === viewId ? 'block' : 'none';
-      }
-      // 自由输入框在 home / advice 视图都可用，回执/状态/劝退视图收起
-      document.getElementById('input-bar').style.display =
-        (viewId === 'home-view' || viewId === 'advice-view') ? 'block' : 'none';
-    }
+    let lastState = null;        // /api/state 最近一次返回（唯一时间与视图源，③-3）
+    let currentAdvice = null;
+    let profile = null;          // 提醒条 + 时间带用（commute/off_work_end）
+    let pendingCalibration;      // 回执优先时暂存的校准（B2 牵连 5）
+    let pendingOffworkPayload;   // 回执答完后继续生成用
+    let recallRecordId = null;
 
-    function setLoading(on) {
-      document.getElementById('loading').style.display = on ? 'block' : 'none';
-    }
-
-    // 所有修改/保存/确认成功后都用它明确告知用户
+    /* ---------- 基础件 ---------- */
     let toastTimer = null;
-    function toast(msg, isErr) {
+    function toast(msg, sticky) {
       const el = document.getElementById('toast');
       el.textContent = msg;
-      el.className = isErr ? 'err' : '';
-      el.style.display = 'block';
+      el.setAttribute('data-show', '');
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => el.style.display = 'none', 4000);
+      if (!sticky) toastTimer = setTimeout(() => el.removeAttribute('data-show'), 3600);
     }
+    function hideToast() { document.getElementById('toast').removeAttribute('data-show'); }
 
-    // 昨晚回执状态行：显示已选项 + 「点错了？改」
-    let yesterdayFb = null;   // {record_id, feedback, advice}
-    function renderYesterdayLine(yf) {
-      yesterdayFb = yf;
-      const line = document.getElementById('yesterday-line');
-      if (!yf) { line.style.display = 'none'; return; }
-      document.getElementById('yesterday-fb').textContent = yf.feedback;
-      line.style.display = 'block';
-    }
-
-    // 「点错了？改」：重新打开回执四档屏
-    function reopenFeedback() {
-      if (!yesterdayFb) return;
-      const a = yesterdayFb.advice || {};
-      document.getElementById('fb-question').textContent =
-        `昨晚「${a.move || a.stop || a.judgement || '的建议'}」做得怎么样？`;
-      document.getElementById('feedback-view').dataset.recordId = yesterdayFb.record_id;
-      show('feedback-view');
+    function setLoading(on) {
+      document.querySelectorAll('.foot .btn.primary').forEach(b => b.disabled = on);
+      if (on) toast('正在想今晚怎么安排，大约十几秒…', true);
+      else hideToast();
     }
 
     async function api(path, body) {
@@ -204,33 +384,152 @@
       return res.json();
     }
 
-    // 开屏先问后端该显示什么（文档 7.1）
-    let lastState = null;
+    /* ---------- 多屏骨架：返回箭头/齿轮按屏配置（齿轮只挂 Home） ---------- */
+    const BACK_TO = { 'confirm': 'home', 'settings': 'home' };   // 其余屏不给返回
+    let activeScreen = 'home';
+    function show(name) {
+      activeScreen = name;
+      document.querySelectorAll('.screen').forEach(s =>
+        s.id === 's-' + name ? s.setAttribute('data-active', '') : s.removeAttribute('data-active'));
+      document.getElementById('navBack').hidden = !(name in BACK_TO);
+      document.getElementById('navGear').hidden = name !== 'home';
+      const body = document.querySelector(`#s-${name} .body`);
+      if (body) body.scrollTop = 0;
+    }
+    document.getElementById('navBack').addEventListener('click', () => show(BACK_TO[activeScreen] || 'home'));
+    document.getElementById('navGear').addEventListener('click', () => show('settings'));
+
+    /* ---------- 抽屉开合 ---------- */
+    function openSheet(id) {
+      const scrim = document.getElementById('sheetScrim');
+      const sheet = document.getElementById(id);
+      scrim.hidden = false; sheet.hidden = false;
+      requestAnimationFrame(() => { scrim.setAttribute('data-open', ''); sheet.setAttribute('data-open', ''); });
+    }
+    function closeSheets() {
+      const scrim = document.getElementById('sheetScrim');
+      document.querySelectorAll('.calibration-sheet').forEach(sh => {
+        sh.removeAttribute('data-open');
+        setTimeout(() => sh.hidden = true, 280);
+      });
+      scrim.removeAttribute('data-open');
+      setTimeout(() => scrim.hidden = true, 280);
+    }
+    document.getElementById('sheetScrim').addEventListener('click', closeSheets);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
+    document.querySelectorAll('[data-note-open]').forEach(b =>
+      b.addEventListener('click', () => {
+        // 快捷区只在已有建议时出现（没建议时纠正类接口会 400）
+        document.getElementById('noteActionsGroup').hidden = !currentAdvice;
+        openSheet('noteSheet');
+      }));
+
+    /* ---------- 折叠组通用 ---------- */
+    document.querySelectorAll('[data-acc]').forEach(btn =>
+      btn.addEventListener('click', () => {
+        const panel = document.getElementById(btn.getAttribute('data-acc'));
+        const open = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', String(!open));
+        panel.hidden = open;
+      }));
+
+    /* ---------- 时间显示 ---------- */
+    function hm(iso) { const d = new Date(iso); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+    function greetingFor(iso) {
+      const h = new Date(iso).getHours();
+      if (h < 5) return '夜深了';
+      if (h < 11) return '早上好';
+      if (h < 14) return '中午好';
+      if (h < 18) return '下午好';
+      if (h < 23) return '晚上好';
+      return '夜深了';
+    }
+    function paintClocks(state) {
+      document.getElementById('clockDisplay').textContent = state.virtual_now_display;
+      const t = hm(state.virtual_now);
+      document.getElementById('homeClock').textContent = t + ' · 又到这个点';
+      document.getElementById('homeGreeting').textContent = greetingFor(state.virtual_now);
+      document.getElementById('confirmClock').textContent = t + ' · 先对一下';
+      document.getElementById('adviceClock').textContent = t;
+      document.getElementById('acceptedClock').textContent = t + ' · 记下了';
+      document.getElementById('byeClock').textContent = t + ' · 今晚不安排';
+    }
+
+    /* ---------- 开屏/刷新：一切以 /api/state 为准（③-3/③-6） ---------- */
     async function refreshState() {
       const res = await fetch('/api/state', { headers: AUTH });
       if (res.status === 401) { localStorage.removeItem('token'); location.href = 'auth.html'; return; }
       const state = await res.json();
       lastState = state;
       if (state.view === 'onboarding') { location.href = 'onboarding.html'; return; }
-      document.getElementById('clock-display').textContent = state.virtual_now_display;
+      paintClocks(state);
       if (state.view === 'rejected') {
-        document.getElementById('rejected-msg').textContent = state.message || '';
-        show('rejected-view');
+        document.getElementById('rejectedMsg').textContent = state.message || '';
+        show('rejected');
         return;
       }
       renderYesterdayLine(state.yesterday_feedback);
-      if (state.view === 'advice') { renderAdvice(state.today_advice); show('advice-view'); }
-      else show('home-view');
-      checkOffworkReminder(state);
+      if (state.view === 'advice') { renderAdvice(state.today_advice); show('advice'); }
+      else show('home');
+      checkReminder(state);
     }
 
-    // ---- V2：下班提醒（到设定下班点弹一条；「还没」30 分钟后再问一次；再没有就不问了）----
-    let profileOffworkEnd = null;   // "19:00"
-    async function loadProfileForReminder() {
-      const res = await fetch('/api/profile', { headers: AUTH });
-      if (res.ok) profileOffworkEnd = ((await res.json()).profile || {}).off_work_end || null;
+    /* ---------- 昨晚回执行 + 「点错了？改」（②-21） ---------- */
+    let yesterdayFb = null;
+    function renderYesterdayLine(yf) {
+      yesterdayFb = yf;
+      const line = document.getElementById('yesterdayLine');
+      line.hidden = !yf;
+      if (yf) document.getElementById('yesterdayFb').textContent = yf.feedback;
+      // 结论屏顶部也带一行（回执可改入口在 Home，这里只显示）
+      const ay = document.getElementById('adviceYesterday');
+      ay.hidden = !yf;
+      if (yf) ay.textContent = `昨晚记为「${yf.feedback}」`;
     }
+    document.getElementById('yesterdayEdit').addEventListener('click', () => {
+      if (!yesterdayFb) return;
+      openRecall(yesterdayFb.record_id, yesterdayFb.advice);
+    });
 
+    /* ---------- 回顾卡（②-20）：四档+跳过，答完按上下文继续 ---------- */
+    function openRecall(recordId, advice) {
+      recallRecordId = recordId;
+      const a = advice || {};
+      document.getElementById('recallQuestion').textContent =
+        `昨晚那条「${a.move || a.stop || a.judgement || '建议'}」，做到了吗`;
+      document.getElementById('recallCard').hidden = false;
+      show('home');
+    }
+    document.querySelectorAll('[data-fb]').forEach(btn =>
+      btn.addEventListener('click', async () => {
+        const fb = btn.getAttribute('data-fb');
+        setLoading(true);
+        const data = await api('/api/feedback', { record_id: recallRecordId, feedback: fb });
+        setLoading(false);
+        if (!data || data.error) { toast((data && data.error) || '提交失败，再试一次'); return; }
+        document.getElementById('recallCard').hidden = true;
+        if (yesterdayFb && yesterdayFb.record_id === recallRecordId) yesterdayFb.feedback = fb;
+        renderYesterdayLine(yesterdayFb || { record_id: recallRecordId, feedback: fb, advice: null });
+        if (data.advice) {
+          // 改回执导致档位变化：后端已重出今晚建议
+          currentAdvice = data.advice;
+          renderAdvice(data.advice); show('advice');
+          toast(`已改为「${fb}」，今晚建议已按新档位重新生成`);
+        } else if (currentAdvice) {
+          show('advice');
+          toast(`已记下：${fb}`);
+        } else if (pendingOffworkPayload !== undefined) {
+          // 首次回执：答完继续生成（校准值此前暂存，B2 牵连 5）
+          toast(`已记下：${fb}`);
+          const payload = pendingOffworkPayload;
+          pendingOffworkPayload = undefined;
+          await doOffwork(payload);
+        } else {
+          toast(`已记下：${fb}`);
+        }
+      }));
+
+    /* ---------- 下班提醒条（②-19，逻辑照搬旧版） ---------- */
     function reminderStore(vday, patch) {
       const cur = JSON.parse(localStorage.getItem('offworkReminder') || '{}');
       const rec = cur.vday === vday ? cur : { vday, asked: 0, nextAskAt: null, done: false };
@@ -238,260 +537,380 @@
       localStorage.setItem('offworkReminder', JSON.stringify(rec));
       return rec;
     }
-
-    function checkOffworkReminder(state) {
-      // 只在「还没生成今晚建议」的 home 视图提醒；虚拟时间由后端给
-      const bar = document.getElementById('offwork-reminder');
-      if (!profileOffworkEnd || state.view !== 'home' || state.today_advice) {
-        bar.style.display = 'none';
-        return;
-      }
+    function checkReminder(state) {
+      const bar = document.getElementById('remindBar');
+      if (!profile || !profile.off_work_end || state.view !== 'home' || state.today_advice) { bar.hidden = true; return; }
       const now = new Date(state.virtual_now);
-      const [h, m] = profileOffworkEnd.split(':').map(Number);
+      const [h, m] = profile.off_work_end.split(':').map(Number);
       const end = new Date(state.virtual_now); end.setHours(h, m, 0, 0);
       const rec = reminderStore(state.vday);
-      if (rec.done || rec.asked >= 2 || now < end) { bar.style.display = 'none'; return; }
-      if (rec.nextAskAt && now < new Date(rec.nextAskAt)) { bar.style.display = 'none'; return; }
-      bar.style.display = 'block';
+      if (rec.done || rec.asked >= 2 || now < end) { bar.hidden = true; return; }
+      if (rec.nextAskAt && now < new Date(rec.nextAskAt)) { bar.hidden = true; return; }
+      bar.hidden = false;
     }
-
-    function reminderYes() {
+    document.getElementById('remindYes').addEventListener('click', () => {
       reminderStore(lastState.vday, { done: true });
-      document.getElementById('offwork-reminder').style.display = 'none';
-      offwork();
-    }
-
-    function reminderNo() {
+      document.getElementById('remindBar').hidden = true;
+      startNight();
+    });
+    document.getElementById('remindNo').addEventListener('click', () => {
       const rec = reminderStore(lastState.vday);
       const next = new Date(new Date(lastState.virtual_now).getTime() + 30 * 60 * 1000);
       reminderStore(lastState.vday, {
         asked: rec.asked + 1,
-        nextAskAt: rec.asked + 1 >= 2 ? null : next.toISOString(),   // 问满两次就不再问
+        nextAskAt: rec.asked + 1 >= 2 ? null : next.toISOString(),
       });
-      document.getElementById('offwork-reminder').style.display = 'none';
-    }
+      document.getElementById('remindBar').hidden = true;
+    });
 
-    // 每 30 秒拉一次状态：驱动提醒条 + 时钟显示跟随虚拟时间（演示拨时钟后无需手动刷新）
-    setInterval(async () => {
-      if (document.getElementById('state-view').style.display === 'block') return;   // 别打断选择
+    /* ---------- 开始今晚 → s-confirm（③-7）：三行判断全部来自 confirm_hint ---------- */
+    function renderConfirm() {
+      const h = lastState && lastState.confirm_hint;
+      if (!h) return false;
+      document.getElementById('chTime').textContent =
+        h.remaining_min > 0 ? `约 ${h.remaining_min} 分钟` : '不多了';
+      document.getElementById('chTimeBasis').textContent = h.time_basis;
+      document.getElementById('chEnergy').textContent = h.energy_guess;
+      document.getElementById('chEnergyBasis').textContent = h.energy_basis;
+      document.getElementById('chBody').textContent = h.body;
+      document.getElementById('confirmTitle').innerHTML =
+        h.energy_guess === '很低' ? '今晚先按<br>省力的来' : '先对一下<br>今晚的判断';
+      return true;
+    }
+    async function startNight() {
+      if (currentAdvice) { show('advice'); return; }
+      // 先拉一次最新 state（confirm_hint 里的剩余分钟跟着虚拟时钟走）
       const res = await fetch('/api/state', { headers: AUTH });
-      if (!res.ok) return;
-      const state = await res.json();
-      lastState = state;
-      document.getElementById('clock-display').textContent = state.virtual_now_display;
-      if (state.view === 'home') checkOffworkReminder(state);
-      else document.getElementById('offwork-reminder').style.display = 'none';
-    }, 30000);
-
-    // 「下班了」（V2 改版）：生成前先问一句今晚状态；可能先要收昨晚回执（文档 7.2）
-    let pickedState;   // 本次「下班了」选的状态（回执流程结束后继续用）
-    function offwork() {
-      pickedState = undefined;
-      show('state-view');
-      document.getElementById('offwork-reminder').style.display = 'none';
+      if (res.ok) { lastState = await res.json(); paintClocks(lastState); }
+      if (renderConfirm()) show('confirm');
+      else await doOffwork({});   // 拿不到 hint（异常兜底）：直接生成
     }
+    document.getElementById('startBtn').addEventListener('click', startNight);
+    document.getElementById('confirmOk').addEventListener('click', () => doOffwork({}));
 
-    // 选完状态（null=跳过）→ 真正调用生成
-    async function pickState(state) {
-      pickedState = state;
-      await doOffwork();
-    }
-
-    async function doOffwork() {
-      setLoading(true);
-      const data = await api('/api/offwork', pickedState ? { state: pickedState } : {});
-      setLoading(false);
-      if (!data) return;
-      if (data.rejected) { await refreshState(); return; }   // 劝退用户：转劝退视图
-      if (data.need_feedback) {
-        const a = data.record.advice || {};
-        document.getElementById('fb-question').textContent =
-          `昨晚「${a.move || a.stop || a.judgement || '的建议'}」做得怎么样？`;
-        document.getElementById('feedback-view').dataset.recordId = data.record.record_id;
-        show('feedback-view');
-        return;
-      }
-      renderAdvice(data.advice); show('advice-view');
-    }
-
-    // 回执四档/跳过 → 写库；首次紧接着生成今晚建议，改回执时可能按新档位重出建议
-    async function sendFeedback(fb) {
-      const recordId = Number(document.getElementById('feedback-view').dataset.recordId);
-      setLoading(true);
-      const data = await api('/api/feedback', { record_id: recordId, feedback: fb });
-      setLoading(false);
-      if (!data || data.error) { toast((data && data.error) || '提交失败，请重试', true); return; }
-      if (yesterdayFb && yesterdayFb.record_id === recordId) yesterdayFb.feedback = fb;
-      renderYesterdayLine(yesterdayFb || { record_id: recordId, feedback: fb, advice: null });
-      if (data.advice) {
-        // 改回执导致档位变化，今晚建议已按新档位重新生成
-        renderAdvice(data.advice); show('advice-view');
-        toast(`已改为「${fb}」，今晚建议已按新档位重新生成 ✓`);
-      } else if (currentAdvice) {
-        // 改回执但档位没变：回到建议卡片
-        show('advice-view');
-        toast(`已记下：${fb} ✓`);
-      } else {
-        // 首次回执：紧接着生成今晚建议（沿用「下班了」时已选的状态）
-        toast(`已记下：${fb} ✓`);
-        await doOffwork();
-      }
-    }
-
-    // 一击纠正 / 难度微调 → 重跑建议
-    async function correct(type) {
-      setLoading(true);
-      const data = await api('/api/correct', { type });
-      setLoading(false);
-      if (data && data.rejected) { await refreshState(); return; }   // 劝退用户
-      if (data && data.message && !data.new_level) {
-        // 难度已到边界：不重新生成，只提示
-        toast(data.message);
-        return;
-      }
-      if (data && data.advice) {
-        renderAdvice(data.advice); show('advice-view');
-        if (data.yesterday_updated) {
-          // 「其实我做了」顺手把昨晚回执改成了完成了
-          if (yesterdayFb) { yesterdayFb.feedback = '完成了'; renderYesterdayLine(yesterdayFb); }
-          toast('已把昨晚记为「完成了」，档位重算，建议已更新 ✓');
-        } else {
-          toast(`已按「${type}」重新生成 ✓`);
-        }
-      } else {
-        toast((data && data.error) || '重新生成失败，请重试', true);
-      }
-    }
-
-    // 自由输入 → 当天已有建议就重出，否则轻确认
-    async function sendFreeInput() {
-      const input = document.getElementById('free-text');
-      const text = input.value.trim();
-      if (!text) return;
-      setLoading(true);
-      const data = await api('/api/free_input', { text });
-      setLoading(false);
-      if (!data) return;
-      if (data.error) { toast(data.error, true); return; }
-      if (data.rejected) { await refreshState(); return; }   // 劝退用户：转劝退视图
-      input.value = '';
-      if (data.advice) {
-        renderAdvice(data.advice); show('advice-view');
-        // 自由输入触发严重疾病标记：当晚仍显示安全模式建议，同时明确告知产品不适用
-        toast(data.advice.severe_notice
-              ? data.advice.severe_notice
-              : '已把这句话考虑进去，建议已更新 ✓', !!data.advice.severe_notice);
-      } else {
-        toast(data.message || '已记下 ✓');
-      }
-    }
-
-    // 食物照片：识别 → 存为当日饮食记录 → 轻确认 + 可删除回退（文档 7.3）
-    async function uploadMealPhoto() {
-      const input = document.getElementById('meal-photo');
-      if (!input.files.length) return;
-      const form = new FormData();
-      form.append('file', input.files[0]);
-      const msg = document.getElementById('input-msg');
-      msg.textContent = '认一下这是什么…';
-      const res = await fetch('/api/meal/photo', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token },   // FormData 不手动设 Content-Type
-        body: form,
+    /* ---------- 改一下抽屉（B2）：时间滚轮默认停在 remaining_min ---------- */
+    const CAL_MIN = 20, CAL_MAX = 180, CAL_STEP = 10;
+    const calList = [];
+    for (let v = CAL_MIN; v <= CAL_MAX; v += CAL_STEP) calList.push(v);
+    let calTimeVal = null;
+    (function buildCalWheel() {
+      const track = document.getElementById('calTimeWheel');
+      calList.forEach(v => {
+        const s = document.createElement('span');
+        s.textContent = `${v} 分钟`; s.setAttribute('role', 'option');
+        track.appendChild(s);
       });
-      const data = await res.json();
-      input.value = '';
-      if (!res.ok || !data.ok) {
-        msg.textContent = '';
-        toast(data.error || '没认出来，晚点再试', true);
+      let timer;
+      track.addEventListener('scroll', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const idx = Math.max(0, Math.min(calList.length - 1, Math.round(track.scrollTop / 40)));
+          calTimeVal = calList[idx];
+          markCal(idx);
+        }, 90);
+      }, { passive: true });
+    })();
+    function markCal(idx) {
+      document.getElementById('calTimeWheel').querySelectorAll('span').forEach((s, i) =>
+        i === idx ? s.setAttribute('data-on', '') : s.removeAttribute('data-on'));
+    }
+    function setCalWheel(minutes) {
+      const clamped = Math.max(CAL_MIN, Math.min(CAL_MAX, Math.round(minutes / CAL_STEP) * CAL_STEP));
+      const idx = calList.indexOf(clamped);
+      calTimeVal = calList[idx];
+      document.getElementById('calTimeWheel').scrollTop = idx * 40;
+      markCal(idx);
+    }
+    document.querySelectorAll('[data-cal]').forEach(el =>
+      el.addEventListener('click', () => {
+        const g = el.getAttribute('data-cal');
+        const wasOn = el.getAttribute('aria-pressed') === 'true';
+        document.querySelectorAll(`[data-cal="${g}"]`).forEach(o => o.setAttribute('aria-pressed', 'false'));
+        if (!wasOn) el.setAttribute('aria-pressed', 'true');   // 再点一次可取消（回到"暂未确认/不改"）
+      }));
+    function openAdjust(presetBody) {
+      const h = (lastState && lastState.confirm_hint) || {};
+      setCalWheel(h.remaining_min || 60);
+      document.querySelectorAll('[data-cal="energy"]').forEach(o =>
+        o.setAttribute('aria-pressed', String(o.getAttribute('data-val') === h.energy_guess)));
+      document.querySelectorAll('[data-cal="body"]').forEach(o =>
+        o.setAttribute('aria-pressed', String(!!presetBody && o.getAttribute('data-val') === presetBody)));
+      openSheet('adjustSheet');
+    }
+    document.querySelectorAll('[data-adjust]').forEach(b => b.addEventListener('click', () => openAdjust()));
+    document.getElementById('calSave').addEventListener('click', () => {
+      const val = g => { const el = document.querySelector(`[data-cal="${g}"][aria-pressed="true"]`); return el ? el.getAttribute('data-val') : null; };
+      const calibration = {
+        time_budget_min: calTimeVal,
+        energy: val('energy'),
+        body: val('body') || '暂未确认',
+      };
+      closeSheets();
+      doOffwork({ calibration });
+    });
+
+    /* ---------- 生成（offwork）：回执待收则暂存 payload，先收回执（B2 牵连 5） ---------- */
+    async function doOffwork(payload) {
+      setLoading(true);
+      const data = await api('/api/offwork', payload || {});
+      setLoading(false);
+      if (!data) return;
+      if (data.rejected) { await refreshState(); return; }
+      if (data.need_feedback) {
+        pendingOffworkPayload = payload || {};
+        const a = data.record.advice || {};
+        openRecall(data.record.record_id, a);
+        toast('先说说昨晚那条怎么样，说完我就开始安排');
         return;
       }
-      // 轻确认 + 「记错了？删除」（识别错/传错图的回退）
-      msg.textContent = '';
-      const confirmSpan = document.createElement('span');
-      confirmSpan.textContent = data.message + ' ';
-      const delBtn = document.createElement('a');
-      delBtn.href = 'javascript:void(0)';
-      delBtn.textContent = '记错了？删除';
-      delBtn.onclick = async () => {
-        const d = await api('/api/meal/delete', { meal_id: data.meal_id });
-        msg.textContent = '';
-        if (d && d.ok) toast(d.message + ' ✓');
-        else toast((d && d.error) || '删除失败', true);
+      currentAdvice = data.advice;
+      await refreshState();   // 用最新 state 统一渲染（时间带/回执行/时钟一起对齐）
+    }
+
+    /* ---------- 结论屏渲染：字段一个不落（③-4 + ②-1~6 基础位） ---------- */
+    function renderAdvice(a) {
+      if (!a) return;
+      currentAdvice = a;
+      loadTrace();
+      document.getElementById('advJudgement').textContent = a.judgement || '';
+      // plan 三行：null 缺席（原型「维度可缺席」设计）
+      const setPlan = (id, text) => {
+        const li = document.getElementById(id);
+        li.hidden = !text;
+        if (text) li.querySelector('span').textContent = text;
       };
-      msg.replaceChildren(confirmSpan, delBtn);
-      setTimeout(() => { if (msg.contains(confirmSpan)) msg.textContent = ''; }, 15000);
+      setPlan('planEat', a.eat);
+      setPlan('planMove', a.move);
+      setPlan('planStop', a.stop);
+      // 理由行（默认收起）
+      document.getElementById('advReason').textContent = a.reason || '（无）';
+      const hasSources = a.sources && a.sources.length;
+      document.getElementById('advSourcesRow').hidden = !hasSources;
+      if (hasSources) document.getElementById('advSources').textContent = a.sources.join('、');
+      // 安全五件套基础位（空即隐藏，P5 收口视觉）
+      const avoid = a.avoid || [];
+      document.getElementById('advAvoid').hidden = !avoid.length;
+      const ul = document.getElementById('advAvoidList');
+      ul.replaceChildren(...avoid.map(t => { const li = document.createElement('li'); li.textContent = t; return li; }));
+      const setText = (id, text) => { const el = document.getElementById(id); el.hidden = !text; el.textContent = text || ''; };
+      setText('advSeeDoctor', a.see_doctor);
+      setText('advSevereNotice', a.severe_notice);
+      setText('advDisclaimer', a.disclaimer);
+      // 安全模式下隐藏「再加一点」（②-17）；「换一种做法」在 crisis 隐藏（B3 口径）
+      const unsafe = a.safety_level && a.safety_level !== 'none';
+      document.getElementById('btnHarder').hidden = !!unsafe;
+      document.getElementById('btnSwitch').hidden = a.safety_level === 'crisis';
+      renderBand();
+      // 理由行/trace 折叠回到默认收起
+      document.querySelectorAll('#s-advice [data-acc]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+      document.getElementById('advWhy').hidden = true;
+      document.getElementById('tracePanel').hidden = true;
     }
 
-    // 接受：界面停在建议卡片，反馈动作发生在下一次触点（文档 7.2）
-    function accept() {
-      document.getElementById('accept-msg').textContent = '好，今晚就这样。有变化随时回来改。';
+    /* ---------- 时间带（③-13）：解析不出就整条隐藏 ---------- */
+    function renderBand() {
+      const band = document.getElementById('advBand');
+      const h = lastState && lastState.confirm_hint;
+      if (!h || !h.sleep_point || !(h.remaining_min > 0)) { band.hidden = true; return; }
+      const now = new Date(lastState.virtual_now);
+      const nowStr = hm(lastState.virtual_now);
+      // 通勤段：还没到家（eta > now）才画（原型：不硬凑）
+      const [eh, em] = h.home_eta.split(':').map(Number);
+      const eta = new Date(lastState.virtual_now); eta.setHours(eh, em, 0, 0);
+      if (eta < now) eta.setDate(eta.getDate() + 1);
+      let commuteMin = Math.round((eta - now) / 60000);
+      if (commuteMin < 0 || commuteMin > 12 * 60) commuteMin = 0;      // 解析异常不硬画
+      const freeMin = h.remaining_min;
+      const total = commuteMin + freeMin;
+      if (!total) { band.hidden = true; return; }
+      band.hidden = false;
+      document.getElementById('bandNow').textContent = nowStr;
+      document.getElementById('bandEnd').textContent = `${h.sleep_point} 睡点`;
+      const spent = document.getElementById('segSpent');
+      spent.hidden = !commuteMin;
+      spent.style.flex = `${commuteMin} 1 0`;
+      document.getElementById('segFree').style.flex = `${freeMin} 1 0`;
+      document.getElementById('labSpent').textContent = commuteMin ? `路上 ${commuteMin} 分` : '';
+      document.getElementById('labSpent').style.flex = `${commuteMin} 1 0`;
+      document.getElementById('labFree').textContent = `在家 ${freeMin} 分`;
+      document.getElementById('labFree').style.flex = `${freeMin} 1 0`;
     }
 
-    // 拉最近一次 Agent 轨迹填进折叠面板（文档 9.4）
+    /* ---------- trace（②-24） ---------- */
     async function loadTrace() {
       const res = await fetch('/api/agent_trace', { headers: AUTH });
       if (!res.ok) return;
       const data = await res.json();
-      const ol = document.getElementById('trace-steps');
-      ol.innerHTML = '';
+      const ul = document.getElementById('tracePanel');
+      ul.innerHTML = '';
       if (!data.trace) return;
       for (const s of data.trace.steps) {
         const li = document.createElement('li');
         li.textContent = s;
-        ol.appendChild(li);
+        ul.appendChild(li);
       }
-      document.getElementById('trace-meta').textContent =
-        `本次思考用时 ${data.trace.duration_s ?? '?'} 秒 · ${data.trace.virtual_time ?? ''}`;
+      const meta = document.createElement('li');
+      meta.textContent = `本次思考用时 ${data.trace.duration_s ?? '?'} 秒 · ${data.trace.virtual_time ?? ''}`;
+      ul.appendChild(meta);
     }
 
-    // 按行渲染建议卡片：null 的行不显示；safety_flag 时只显示休息/就医提示（文档 5.2）
-    let currentAdvice = null;
-    function renderAdvice(a) {
-      currentAdvice = a;
-      loadTrace();   // 每次建议更新都同步刷新轨迹面板
-      document.getElementById('accept-msg').textContent = '';
-      const set = (id, text) => {
-        const el = document.getElementById(id);
-        el.style.display = text ? '' : 'none';
-        el.textContent = text || '';
-      };
-      // V2 起统一渲染：安全模式下 eat/move 已被后端 L3 置空，avoid/see_doctor 由后端拼好，
-      // 前端只负责展示（危机时整卡已被替换为求助文案，同样走这条路径）
-      set('adv-judgement', a.judgement);
-      set('adv-reason', a.reason);
-      set('adv-eat', a.eat ? '吃：' + a.eat : null);
-      set('adv-move', a.move ? '动：' + a.move : null);
-      set('adv-stop', a.stop ? '停：' + a.stop : null);
-      const avoid = a.avoid || [];
-      document.getElementById('adv-avoid-wrap').style.display = avoid.length ? '' : 'none';
-      const avoidList = document.getElementById('adv-avoid-list');
-      avoidList.innerHTML = '';
-      for (const item of avoid) {
-        const li = document.createElement('li');
-        li.textContent = item;
-        avoidList.appendChild(li);
-      }
-      set('adv-see-doctor', a.see_doctor);
-      set('adv-severe-notice', a.severe_notice);
-      set('adv-disclaimer', a.disclaimer);
-      set('adv-sources', a.sources && a.sources.length ? '参考依据：' + a.sources.join('、') : null);
-      // 安全模式下不显示「再加一点」：运动本来就被撤了，加量按钮只会带来困惑
-      document.getElementById('harder-btn').style.display =
-        (a.safety_level && a.safety_level !== 'none') ? 'none' : '';
-    }
+    /* ---------- 接受 → 印章屏（①-8，不写本地历史） ---------- */
+    document.getElementById('acceptBtn').addEventListener('click', () => {
+      const a = currentAdvice || {};
+      document.getElementById('stampLine').textContent = a.stop || a.judgement || '今晚从简';
+      show('accepted');
+    });
+    document.getElementById('acceptedBack').addEventListener('click', () => show('advice'));
 
-    // 时间变化后重新拉 /api/state，界面随之切换（文档第八节）
-    async function changeClock(payload) {
-      await fetch('/api/clock', {
+    /* ---------- 抽屉动作：纠正/难度/换做法（类型字符串逐字对齐后端） ---------- */
+    document.querySelectorAll('[data-correct]').forEach(btn =>
+      btn.addEventListener('click', async () => {
+        const type = btn.getAttribute('data-correct');
+        closeSheets();
+        setLoading(true);
+        const data = await api('/api/correct', { type });
+        setLoading(false);
+        if (data && data.rejected) { await refreshState(); return; }
+        if (data && data.message && !data.new_level) { toast(data.message); return; }   // 到顶/到底：不重渲染（②-17/18）
+        if (data && data.advice) {
+          currentAdvice = data.advice;
+          await refreshState();
+          if (data.yesterday_updated) toast('已把昨晚记为「完成了」，档位重算，建议已更新');
+          else toast(`已按「${type === '难度再低一点' ? '再轻一点' : type === '难度再高一点' ? '再加一点' : type}」重新安排`);
+        } else {
+          toast((data && data.error) || '重新生成失败，再试一次');
+        }
+      }));
+
+    /* ---------- 今天不做 → s-bye（③-16 配套：不调接口、不记录） ---------- */
+    document.getElementById('noteBye').addEventListener('click', () => { closeSheets(); show('bye'); });
+    document.getElementById('byeBack').addEventListener('click', () => show('home'));
+
+    /* ---------- 补充一句（noteSheet）/ 树洞 → /api/free_input ---------- */
+    async function sendFree(text, sourceInput) {
+      if (!text.trim()) return;
+      setLoading(true);
+      const data = await api('/api/free_input', { text: text.trim() });
+      setLoading(false);
+      if (!data) return;
+      if (data.error) { toast(data.error); return; }
+      if (data.rejected) { await refreshState(); return; }
+      sourceInput.value = '';
+      if (data.advice) {
+        currentAdvice = data.advice;
+        await refreshState();
+        toast(data.advice.severe_notice ? data.advice.severe_notice : '已把这句话考虑进去，建议更新了');
+      } else {
+        toast(data.message || '已记下');
+      }
+    }
+    document.getElementById('noteSubmit').addEventListener('click', () => {
+      const el = document.getElementById('noteText');
+      closeSheets();
+      sendFree(el.value, el);
+    });
+    document.getElementById('freeSendHome').addEventListener('click', () => {
+      const el = document.getElementById('freeTextHome');
+      sendFree(el.value, el);
+    });
+    document.getElementById('freeTextHome').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('freeSendHome').click(); }
+    });
+
+    /* ---------- 树洞/食记面板开合（共享展开位：开一个关另一个） ---------- */
+    document.querySelectorAll('[data-panel]').forEach(cell =>
+      cell.addEventListener('click', () => {
+        const id = cell.getAttribute('data-panel');
+        const panel = document.getElementById(id);
+        const isOpen = !panel.hidden;
+        document.querySelectorAll('.homepanel').forEach(p => { if (p.id !== 'photoReceipt') p.hidden = true; });
+        document.querySelectorAll('[data-panel]').forEach(c => c.setAttribute('aria-expanded', 'false'));
+        if (!isOpen) { panel.hidden = false; cell.setAttribute('aria-expanded', 'true'); }
+      }));
+
+    /* ---------- 食记：单张上传（③-15）+ 确认句 + 记错了？删除 ---------- */
+    let lastMealId = null;
+    document.getElementById('photoPick').addEventListener('click', () => document.getElementById('photoInput').click());
+    document.getElementById('photoInput').addEventListener('change', async () => {
+      const input = document.getElementById('photoInput');
+      if (!input.files.length) return;
+      const form = new FormData();
+      form.append('file', input.files[0]);
+      toast('认一下这是什么…', true);
+      const res = await fetch('/api/meal/photo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        headers: { 'Authorization': 'Bearer ' + token },
+        body: form,
       });
-      await refreshState();
-    }
+      const data = await res.json();
+      input.value = '';
+      hideToast();
+      if (!res.ok || !data.ok) { toast(data.error || '没认出来，晚点再试'); return; }
+      lastMealId = data.meal_id;
+      document.getElementById('photoMsg').textContent = data.message;
+      document.getElementById('photoReceipt').hidden = false;
+    });
+    document.getElementById('photoDelete').addEventListener('click', async () => {
+      if (!lastMealId) return;
+      const d = await api('/api/meal/delete', { meal_id: lastMealId });
+      document.getElementById('photoReceipt').hidden = true;
+      if (d && d.ok) toast(d.message);
+      else toast((d && d.error) || '删除失败');
+    });
 
-    loadProfileForReminder().then(refreshState);
+    /* ---------- 安全出口（P5 收口）：有建议 → correct 不太舒服；没建议 → 校准预置有明显不适 ---------- */
+    document.querySelectorAll('[data-safety-exit]').forEach(b =>
+      b.addEventListener('click', async () => {
+        if (currentAdvice) {
+          setLoading(true);
+          const data = await api('/api/correct', { type: '不太舒服' });
+          setLoading(false);
+          if (data && data.rejected) { await refreshState(); return; }
+          if (data && data.advice) {
+            currentAdvice = data.advice;
+            await refreshState();
+            toast('好，先按舒服的来，建议已经收着了');
+          }
+        } else {
+          if (!lastState || !lastState.confirm_hint) { await startNight(); }
+          openAdjust('有明显不适');
+        }
+      }));
+
+    /* ---------- 时钟条 + 30s 轮询（②-25 / ③-3） ---------- */
+    document.querySelectorAll('[data-clock]').forEach(btn =>
+      btn.addEventListener('click', async () => {
+        await fetch('/api/clock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(JSON.parse(btn.getAttribute('data-clock'))),
+        });
+        currentAdvice = null;   // 换天后旧建议作废，交给 refreshState 重判视图
+        await refreshState();
+      }));
+    setInterval(async () => {
+      // 别打断正在进行的选择/抽屉
+      if (!document.getElementById('noteSheet').hidden || !document.getElementById('adjustSheet').hidden) return;
+      if (activeScreen === 'confirm') return;
+      const res = await fetch('/api/state', { headers: AUTH });
+      if (!res.ok) return;
+      lastState = await res.json();
+      document.getElementById('clockDisplay').textContent = lastState.virtual_now_display;
+      if (activeScreen === 'home') { paintClocks(lastState); checkReminder(lastState); }
+    }, 30000);
+
+    /* ---------- 退出登录 ---------- */
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      localStorage.removeItem('token');
+      location.href = 'index.html';
+    });
+
+    /* ---------- 启动 ---------- */
+    (async () => {
+      const res = await fetch('/api/profile', { headers: AUTH });
+      if (res.ok) profile = (await res.json()).profile;
+      await refreshState();
+    })();
   </script>
 </body>
 </html>
