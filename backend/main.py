@@ -196,13 +196,18 @@ def _run_and_save_today(user_id: int, username: str, record=None,
                                      safety_state=safety_state)
     conditions["agent_notes"] = advice.get("agent_notes", [])
 
-    # 严重疾病劝退入口之二（V2 文档 4.4）：自由输入/纠正里自述严重疾病 →
-    # 当晚已按 danger 出安全模式建议，这里写入档案（后续 /api/state 转 rejected 视图）
+    # 严重疾病劝退入口之二（V2 文档 4.4）：自由输入/纠正里【自述】严重疾病 →
+    # 当晚已按 danger 出安全模式建议，这里写入档案（后续 /api/state 转 rejected 视图）。
+    # 问句（"我是不是得了心脏病？"）只触发当晚安全模式，不写档案——劝退是持久动作。
     if "severe" in safety_state["categories"] and profile is not None:
         severe_words = [h.split("(")[0] for h in safety_state["hits"] if "严重疾病" in h]
-        db.mark_severe(user_id, f"用户自述（{'、'.join(severe_words)}）")
-        advice["severe_notice"] = safety.SEVERE_NOTICE
-        logger.warning("user=%s 自由输入命中严重疾病词 %s，已标记劝退", username, severe_words)
+        if safety.is_severe_self_report("\n".join(texts), severe_words):
+            db.mark_severe(user_id, f"用户自述（{'、'.join(severe_words)}）")
+            advice["severe_notice"] = safety.SEVERE_NOTICE
+            logger.warning("user=%s 自述严重疾病 %s，已标记劝退", username, severe_words)
+        else:
+            logger.info("user=%s 疑问语境提及严重疾病词 %s，仅当晚安全模式、不写档案",
+                        username, severe_words)
     if record is None:
         db.insert_daily_record(
             user_id, clock.today(),

@@ -335,6 +335,22 @@ def context_line(safety_state: dict) -> str | None:
 _INTERNAL_JARGON_WORDS = ("安全状态", "L1", "L2", "判定为", "禁止安排")
 
 
+def is_severe_self_report(text: str, severe_words: list[str]) -> bool:
+    """区分"自述患有严重疾病"（我有心脏病/前年心梗过）与"询问是否得病"（我是不是得了
+    心脏病？）。只有自述才写入档案劝退；问句当晚照样 danger 安全模式，但不锁档案——
+    把一个担心自己的提问者永久劝退是过度反应，且劝退是持久动作，不适用"宁可误报"。"""
+    for w in severe_words:
+        for m in re.finditer(re.escape(w), text or ""):
+            ctx = text[max(0, m.start() - 8): m.end() + 4]
+            # 疑问语境：是不是/会不会/是否/算不算 在病名附近，或病名后紧跟 吗/？
+            if re.search(r"是不是|会不会|是否|算不算|有没有可能", ctx):
+                continue
+            if re.search(re.escape(w) + r"[^。！？]{0,2}[吗？?]", ctx):
+                continue
+            return True   # 存在至少一处非疑问语境的严重疾病词 → 按自述处理
+    return False
+
+
 # ---- L3 固定话术（V2 文档五；后端拼接，永不指望模型写）----
 # 危机文案：用户 2026-08-08 确认——不提供任何求助热线，只建议就医/咨询专业医生
 CRISIS_JUDGEMENT = "听起来你现在很难受。今晚不用做任何事，好好休息。"
@@ -368,10 +384,12 @@ _TEXT_FIELDS = ("judgement", "reason", "eat", "move", "stop")
 
 # 营养数字（kcal/千卡/大卡/克/g）：本轮没调 calc_body_metrics 就一律删（基线用例 7 两次编造）
 _NUTRI_NUM_RE = re.compile(r"[约大概≈~]*\d+(?:\.\d+)?\s*(?:kcal|千卡|大卡|克|g)(?![a-zA-Z0-9])")
-# 医疗数字（mmHg/mmol/血压/血糖目标值）：无论模型怎么来的都删（V2 文档 4.3 数字禁区）
+# 医疗数字（mmHg/mmol/血压/血糖目标值）：无论模型怎么来的都删（V2 文档 4.3 数字禁区）。
+# 血压/血糖分支排除括号：《成人高血压食养指南(2023)》这类文献名里的年份不是血压值，
+# 不能误删（S7 回归时发现"血压食养指南(2023"会被该分支命中）。
 _MED_NUM_RE = re.compile(
     r"[约大概≈~]*\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?\s*(?:mmHg|毫米汞柱|mmol/?L?)"
-    r"|(?:血压|血糖)[^，。；！？]{0,6}?\d+(?:[./]\d+(?:\.\d+)?)*"
+    r"|(?:血压|血糖)[^，。；！？()（）《》]{0,6}?\d+(?:[./]\d+(?:\.\d+)?)*"
 )
 # 诊断断言（'是/可能是/得了 + 疾病名'句式）：疾病名表与 L1 共用（V2 文档 3.3）
 _DIAG_RE = re.compile(

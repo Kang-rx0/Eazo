@@ -286,6 +286,14 @@ class TestEnforceL3(unittest.TestCase):
         self.assertNotIn("7.8", out["reason"])
         self.assertTrue(any("血压血糖" in r for r in rewrites))
 
+    def test_数字校验_文献名年份不误删(self):
+        # 《成人高血压食养指南(2023)》的"血压…2023"不是血压值（S7 回归发现的误删隐患）
+        out, rewrites = enforce(
+            self._advice(reason="依据《成人高血压食养指南(2023)》，晚餐清淡少盐"),
+            assess([]), [])
+        self.assertIn("2023", out["reason"])
+        self.assertEqual([r for r in rewrites if "血压血糖" in r], [])
+
     def test_诊断断言过滤(self):
         # 基线用例 6 的目标行为：不出现疾病断言（"可能是心脏病"）
         out, rewrites = enforce(
@@ -527,6 +535,14 @@ class TestS4ChronicTwoTier(unittest.TestCase):
                              ["chronic_profile"], [])   # 严重疾病走劝退，不入慢病管理
             self.assertEqual(assess([], chronic_condition="无")["chronic_profile"], [])
             m.assert_not_called()
+
+    def test_严重疾病_自述与问句区分(self):
+        # 自述 → 写档案劝退；问句 → 只当晚安全模式（劝退是持久动作，不适用"宁可误报"）
+        self.assertTrue(safety.is_severe_self_report("对了，我有心脏病", ["心脏病"]))
+        self.assertTrue(safety.is_severe_self_report("我前年心梗过", ["心梗"]))
+        self.assertFalse(safety.is_severe_self_report("最近老是心悸，我是不是得了心脏病？", ["心脏病"]))
+        self.assertFalse(safety.is_severe_self_report("这会不会是心脏病", ["心脏病"]))
+        self.assertFalse(safety.is_severe_self_report("我这是心脏病吗", ["心脏病"]))
 
     def test_慢性病尾注常量无占位符(self):
         for text in (safety.SEVERE_NOTICE, safety.CHRONIC_DISCLAIMER,
