@@ -73,6 +73,38 @@ SOURCES = [
             {"url": "https://www.cdc.gov/niosh/bulletin/2020/sleep.html", "type": "html"},
         ],
     },
+    # ---- V2 S5：慢病食养指南（文档 4.3.1）。主源卫健委官方 PDF，403/失效时用疾控中心转载页 ----
+    # 收录疾病特点、食养原则和建议部分即可，各地食谱套餐示例可略（truncate_markers 截断）
+    {
+        "file": "高血压食养指南2023.md",
+        "doc_name": "成人高血压食养指南(2023)",
+        "category": "diet",
+        "pages": [
+            {"url": "https://www.nhc.gov.cn/sps/c100088/202301/f01895a06c5349ef999f25da833c166d/files/1732844468193_68545.pdf",
+             "type": "pdf"},
+        ],
+        "backup_pages": [
+            {"url": "https://www.chinacdc.cn/jkyj/yyyjk2/jswj13949/202504/t20250407_305763.html",
+             "type": "html"},
+        ],
+        "start_markers": ["一、前言"],
+        "truncate_markers": ["附录 3", "附录3", "不同地区食谱示例"],
+    },
+    {
+        "file": "糖尿病食养指南2023.md",
+        "doc_name": "成人糖尿病食养指南(2023)",
+        "category": "diet",
+        "pages": [
+            {"url": "https://www.nhc.gov.cn/cms-search/downFiles/4fcbecd2c18e46baaf291bf46c2b79cd.pdf",
+             "type": "pdf"},
+        ],
+        "backup_pages": [
+            {"url": "https://www.chinacdc.cn/jkyj/yyyjk2/jswj13949/202504/t20250407_305766.html",
+             "type": "html"},
+        ],
+        "start_markers": ["一、前言"],
+        "truncate_markers": ["附录 3", "附录3", "不同地区食谱示例"],
+    },
 ]
 
 # 领域关键词表（清洗规则 3）：长段落里一个都不含 → 视为无关内容丢弃
@@ -160,36 +192,75 @@ def clean_text(text: str) -> str:
     return "\n\n".join(kept)
 
 
+def crawl_page(page: dict) -> str:
+    """抓一个页面并清洗，返回正文（过短抛异常）。原始文件存 corpus_raw/。"""
+    url = page["url"]
+    resp = fetch(url)
+    ext = "pdf" if page["type"] == "pdf" else "html"
+    raw_name = re.sub(r"\W+", "_", url)[-80:] + "." + ext
+    (RAW_DIR / raw_name).write_bytes(resp.content)
+    if page["type"] == "pdf":
+        body = clean_text(clean_pdf(resp.content))
+    else:
+        resp.encoding = resp.apparent_encoding  # 政府站常见 GBK
+        body = clean_text(clean_html(resp.text))
+    if len(body) < 200:
+        raise ValueError(f"清洗后正文过短({len(body)}字)，多半没抓到正文")
+    return body
+
+
 def main() -> None:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     CORPUS_DIR.mkdir(parents=True, exist_ok=True)
     failures = []
+    # 支持只抓指定文件：python scripts/crawl_corpus.py 高血压食养指南2023.md …
+    # （V2 S5 只补两份新语料，不重抓已入库的旧来源——Mayo 拉伸页已改版，重抓会变差）
+    only = set(sys.argv[1:])
 
     for src in SOURCES:
+        if only and src["file"] not in only:
+            continue
         print(f"== {src['file']} ({src['doc_name']}) ==")
         bodies, ok_urls = [], []
         for page in src["pages"]:
             url = page["url"]
             print(f"  抓取 {url}")
             try:
-                resp = fetch(url)
-                # 原始文件存 corpus_raw/
-                ext = "pdf" if page["type"] == "pdf" else "html"
-                raw_name = re.sub(r"\W+", "_", url)[-80:] + "." + ext
-                (RAW_DIR / raw_name).write_bytes(resp.content)
-                if page["type"] == "pdf":
-                    body = clean_text(clean_pdf(resp.content))
-                else:
-                    resp.encoding = resp.apparent_encoding  # 政府站常见 GBK
-                    body = clean_text(clean_html(resp.text))
-                if len(body) < 200:
-                    raise ValueError(f"清洗后正文过短({len(body)}字)，多半没抓到正文")
-                bodies.append(body)
+                bodies.append(crawl_page(page))
                 ok_urls.append(url)
             except Exception as e:  # noqa: BLE001
                 print(f"  [失败] {url} -> {e}")
                 failures.append((src["file"], url, str(e)))
             time.sleep(2)  # 来源之间限速
+
+        # 主源全失败 → 试备源（V2 文档 4.3.1：主源失效/403 则用备源）
+        if not bodies:
+            for page in src.get("backup_pages", []):
+                url = page["url"]
+                print(f"  [备源] 抓取 {url}")
+                try:
+                    bodies.append(crawl_page(page))
+                    ok_urls.append(url)
+                    break
+                except Exception as e:  # noqa: BLE001
+                    print(f"  [失败] {url} -> {e}")
+                    failures.append((src["file"], url, str(e)))
+                time.sleep(2)
+
+        # 正文起点（跳过封面/目录）：标记在目录里也会出现，取【最后一次】出现的位置
+        for marker in src.get("start_markers", []):
+            for i, b in enumerate(bodies):
+                pos = b.rfind(marker)
+                if pos > 0:
+                    bodies[i] = b[pos:]
+                    print(f"  [起点] 从最后一个「{marker}」开始（跳过 {pos} 字封面/目录）")
+        # 附录/食谱示例截断（V2 文档 4.3.1：各地食谱套餐示例可略）；同样取最后一次出现
+        for marker in src.get("truncate_markers", []):
+            for i, b in enumerate(bodies):
+                pos = b.rfind(marker)
+                if pos > 500:
+                    bodies[i] = b[:pos]
+                    print(f"  [截断] 在最后一个「{marker}」处截去附录（保留 {pos} 字）")
 
         out = CORPUS_DIR / src["file"]
         header = (f"<!-- doc_name: {src['doc_name']}, category: {src['category']}, "
