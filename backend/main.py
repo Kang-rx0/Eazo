@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, clock, config, db, llm
+from . import agent, clock, config, db, llm, safety
 from .logging_setup import setup_logging
 
 setup_logging()
@@ -171,8 +171,19 @@ def _run_and_save_today(user_id: int, username: str, record=None,
     else:
         level = record["baseline_level"] if record["baseline_level"] is not None else 3
         conditions = json.loads(record["conditions_json"] or "{}")
+
+    # 输入侧安全检测（V2 三层架构入口）：当天全部自由输入 + 纠正项合并过 L1。
+    # 当天说过的危险信号对当晚整晚有效——之后不管因为什么重新生成建议，都带着这个等级。
+    # （S2 在 assess 里加 L2 分类器；S3 补 health_note 与上下文注入）
+    texts = db.get_free_inputs(user_id, clock.today()) + list(conditions.get("纠正", []))
+    safety_state = safety.assess(texts)
+    if safety_state["final_level"] != "none" or safety_state["hits"]:
+        conditions["安全"] = {"level": safety_state["final_level"],
+                              "命中": safety_state["hits"], "L2": safety_state["l2"]}
+
     advice, _trace = agent.run_agent(user_id, username, baseline_level=level,
-                                     extra_conditions=extra_conditions)
+                                     extra_conditions=extra_conditions,
+                                     safety_state=safety_state)
     conditions["agent_notes"] = advice.get("agent_notes", [])
     if record is None:
         db.insert_daily_record(

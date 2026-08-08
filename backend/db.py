@@ -325,6 +325,20 @@ def insert_free_input(user_id: int, vday: str, vtime: str, text: str) -> int:
         conn.close()
 
 
+def get_free_inputs(user_id: int, vday: str) -> list[str]:
+    """取某天的全部自由输入原话（按时间顺序）。安全边界 L1 扫描用：
+    当天说过的危险信号（如"胸口闷"）对当晚整晚有效，重新生成建议时都要扫。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT text FROM free_inputs WHERE user_id = ? AND vday = ? ORDER BY vtime, id",
+            (user_id, vday),
+        ).fetchall()
+        return [r["text"] for r in rows]
+    finally:
+        conn.close()
+
+
 def set_free_input_extracted(free_input_id: int, extracted_json: str) -> None:
     conn = get_conn()
     try:

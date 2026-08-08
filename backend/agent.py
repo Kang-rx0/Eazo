@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime, timedelta
 
-from . import clock, config, db, llm, tools
+from . import clock, config, db, llm, safety, tools
 
 logger = logging.getLogger(__name__)
 
@@ -187,8 +187,12 @@ def _save_trace(username: str, trace: dict) -> None:
 
 
 def run_agent(user_id: int, username: str, baseline_level: int = 3,
-              extra_conditions: list[str] | None = None) -> tuple[dict, dict]:
-    """Agent 主循环（文档 3.3）。返回 (advice, trace)；任何失败路径返回兜底建议。"""
+              extra_conditions: list[str] | None = None,
+              safety_state: dict | None = None) -> tuple[dict, dict]:
+    """Agent 主循环（文档 3.3）。返回 (advice, trace)；任何失败路径返回兜底建议。
+    safety_state：输入侧安全检测结果（safety.assess），出口处由 L3 强制执行；
+    不传则按 none 处理——数字校验和诊断断言过滤仍然全量跑（所有等级都跑的硬防线）。
+    """
     start = time.perf_counter()
     notes: list[str] = []
     context = build_context(user_id, baseline_level, extra_conditions)
@@ -265,6 +269,16 @@ def run_agent(user_id: int, username: str, baseline_level: int = 3,
         if advice is None:
             advice = dict(FALLBACK_ADVICE)
             logger.error("user=%s 强制收敛失败，走兜底", username)
+
+    # L3 输出后校验（V2 安全边界）：按安全等级强制改写，兜底建议也不例外
+    # （danger 时连兜底的"走 8 分钟"都必须撤——执行必须是代码，不依赖任何模型自觉）
+    if safety_state is None:
+        safety_state = safety.assess([])
+    tools_called = [r["tool"] for r in trace["rounds"] if r.get("tool")]
+    advice, rewrites = safety.enforce(advice, safety_state, tools_called)
+    trace["safety"] = {"等级": safety_state["final_level"], "类别": safety_state.get("category"),
+                       "L1命中": safety_state.get("hits", []), "L2": safety_state.get("l2"),
+                       "L3改写": rewrites}
 
     if notes:
         advice["agent_notes"] = notes

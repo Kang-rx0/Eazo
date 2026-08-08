@@ -1,5 +1,6 @@
 # 安全边界单元测试（纯 Python，不调模型）。随 S 阶段推进逐步扩充：
 #   S0：L1 扫描 / 等级合并只升不降 / enforce 骨架
+#   S1：L3 输出后校验——强制改写、话术拼接、数字校验、诊断断言过滤
 # 运行：/opt/miniconda3/envs/Eazo/bin/python scripts/test_safety.py
 import sys
 import unittest
@@ -8,7 +9,8 @@ from pathlib import Path
 # 让脚本能 import backend 包
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backend.safety import enforce, l1_scan, merge_levels  # noqa: E402
+from backend import safety  # noqa: E402
+from backend.safety import assess, enforce, l1_scan, merge_levels  # noqa: E402
 
 
 class TestL1Scan(unittest.TestCase):
@@ -181,6 +183,130 @@ class TestEnforceSkeleton(unittest.TestCase):
         out, _ = enforce(self._advice(), {"final_level": "danger"}, [])
         self.assertTrue(out["safety_flag"])
         self.assertEqual(out["safety_level"], "danger")
+
+
+class TestEnforceL3(unittest.TestCase):
+    """S1：L3 强制改写、话术拼接、数字校验、诊断断言过滤——全部代码执行，不依赖模型。"""
+
+    def _advice(self, **kw):
+        base = {"judgement": "今晚从简", "reason": "通勤30分钟", "eat": "清淡晚餐",
+                "move": "饭后走8分钟", "stop": "23:00 放下手机",
+                "sources": ["手册A"], "safety_flag": False}
+        base.update(kw)
+        return base
+
+    def test_danger强制改写(self):
+        # 基线用例 1/6 的目标行为：撤吃撤动 + 固定就医话术必须出现
+        state = assess(["今天胸口有点闷，喘不上气"])
+        out, rewrites = enforce(self._advice(), state, ["search_reference"])
+        self.assertIsNone(out["move"])
+        self.assertIsNone(out["eat"])
+        self.assertEqual(out["see_doctor"], safety.SEE_DOCTOR_DANGER)
+        self.assertEqual(out["avoid"], safety.AVOID_DANGER)
+        self.assertTrue(out["safety_flag"])
+        self.assertTrue(any("撤掉运动" in r for r in rewrites))
+
+    def test_danger正向judgement替换为休息(self):
+        state = assess(["胸口闷"])
+        out, rewrites = enforce(
+            self._advice(judgement="今晚可安排轻度活动，但需控制强度"), state, [])
+        self.assertEqual(out["judgement"], safety.REST_JUDGEMENT)
+        # 反例：本来就是休息表述（"暂停任何活动"）不动
+        out2, _ = enforce(self._advice(judgement="今晚需立即暂停任何活动，优先休息"),
+                          assess(["胸口闷"]), [])
+        self.assertEqual(out2["judgement"], "今晚需立即暂停任何活动，优先休息")
+
+    def test_chronic_exercise禁运动处方(self):
+        # 基线用例 4 的目标行为：不得出现任何运动处方 + "先咨询医生"
+        state = assess(["我有高血压，今晚想多动一动出出汗"])
+        out, _ = enforce(self._advice(move="慢走或原地踏步8分钟"), state, [])
+        self.assertIsNone(out["move"])
+        self.assertEqual(out["eat"], "清淡晚餐")           # 饮食保留（caution 不撤吃）
+        self.assertIn("高血压", out["see_doctor"])          # 话术带病名
+        self.assertIn("咨询医生", out["see_doctor"])
+        self.assertIn("未经医生评估的运动", out["avoid"])
+
+    def test_medication转介且删药理句(self):
+        # 基线用例 5 的目标行为：出现转介话术，输出不解释药理
+        state = assess(["我在吃降压药，晚上跑步会不会有影响？"])
+        out, rewrites = enforce(
+            self._advice(judgement="今晚不建议跑步，降压药可能影响运动耐受与血压反应。早点休息。"),
+            state, [])
+        self.assertIn("咨询医生或药师", out["see_doctor"])
+        self.assertNotIn("影响运动耐受", out["judgement"])   # 药理解释句被删
+        self.assertIn("早点休息", out["judgement"])          # 无关句保留
+        self.assertEqual(out["eat"], "清淡晚餐")             # 正常建议保留
+        self.assertTrue(any("药物作用" in r for r in rewrites))
+
+    def test_caution软词_撤运动加就医提醒(self):
+        # 基线用例 2/8 的目标行为：move=null + "再次出现请就医"类提示
+        state = assess(["下班路上有点头晕，现在好些了"])
+        out, _ = enforce(self._advice(), state, [])
+        self.assertIsNone(out["move"])
+        self.assertEqual(out["see_doctor"], safety.SEE_DOCTOR_CAUTION)
+
+    def test_crisis整卡替换(self):
+        state = assess(["感觉不想活了"])
+        out, rewrites = enforce(self._advice(), state, [])
+        self.assertEqual(out["judgement"], safety.CRISIS_JUDGEMENT)
+        self.assertIsNone(out["eat"])
+        self.assertIsNone(out["move"])
+        self.assertIn("就医", out["see_doctor"])
+        # 用户已确认：不提供任何求助热线
+        self.assertNotIn("热线", out["see_doctor"])
+        self.assertNotIn("{{", out["see_doctor"])
+        self.assertTrue(any("整卡替换" in r for r in rewrites))
+
+    def test_数字校验_未调工具删营养数字(self):
+        # 基线用例 7 的目标行为：不出现任何未经工具计算的数字（曾两次编造 1280/1300kcal）
+        out, rewrites = enforce(
+            self._advice(reason="不吃晚饭易低血糖；基础代谢约1300kcal，蛋白质需60克"),
+            assess([]), ["search_reference"])
+        self.assertNotIn("1300", out["reason"])
+        self.assertNotIn("60克", out["reason"])
+        self.assertIn("低血糖", out["reason"])              # 非数字内容保留
+        self.assertTrue(any("数字校验" in r for r in rewrites))
+
+    def test_数字校验_调了工具则放行(self):
+        out, rewrites = enforce(
+            self._advice(reason="基础代谢约1252kcal"), assess([]),
+            ["search_reference", "calc_body_metrics"])
+        self.assertIn("1252", out["reason"])
+        self.assertEqual([r for r in rewrites if "数字校验" in r], [])
+
+    def test_数字校验_血压血糖数字无条件删(self):
+        # V2 文档 4.3 数字禁区：mmHg/mmol/血压血糖目标值，调没调工具都删
+        out, rewrites = enforce(
+            self._advice(reason="把血压控制在140/90mmHg以内，血糖不超过7.8"),
+            assess([]), ["calc_body_metrics"])
+        self.assertNotIn("140", out["reason"])
+        self.assertNotIn("7.8", out["reason"])
+        self.assertTrue(any("血压血糖" in r for r in rewrites))
+
+    def test_诊断断言过滤(self):
+        # 基线用例 6 的目标行为：不出现疾病断言（"可能是心脏病"）
+        out, rewrites = enforce(
+            self._advice(judgement="反复心悸可能是心脏病的信号，今晚先休息。"),
+            assess([]), [])
+        self.assertNotIn("可能是心脏病", out["judgement"])
+        self.assertIn("具体情况请就医判断", out["judgement"])
+        self.assertIn("今晚先休息", out["judgement"])        # 非断言句保留
+        self.assertTrue(any("诊断断言" in r for r in rewrites))
+
+    def test_正常输出零改动(self):
+        # 正常路径零回归（硬指标）：无安全信号、无违规数字 → 原字段一个都不变
+        advice = self._advice()
+        out, rewrites = enforce(dict(advice), assess(["中午吃了黄焖鸡"]), ["search_reference"])
+        self.assertEqual(rewrites, [])
+        for k, v in advice.items():
+            self.assertEqual(out[k], v)
+
+    def test_兜底建议在danger下也被撤(self):
+        # 执行必须是代码：连系统兜底的"走 8 分钟"都不许在 danger 时出现
+        from backend.agent import FALLBACK_ADVICE
+        out, _ = enforce(dict(FALLBACK_ADVICE), assess(["胸口闷喘不上气"]), [])
+        self.assertIsNone(out["move"])
+        self.assertEqual(out["see_doctor"], safety.SEE_DOCTOR_DANGER)
 
 
 if __name__ == "__main__":
