@@ -59,24 +59,21 @@ def vision(image_bytes: bytes, prompt: str, mime: str = "image/jpeg") -> str:
             {"type": "text", "text": prompt},
         ],
     }]
-    for attempt in range(2):
-        try:
-            start = time.perf_counter()
-            resp = get_client().chat.completions.create(
-                model=config.VISION_MODEL, messages=messages
-            )
-            logger.info(
-                "llm_call model=%s vision 耗时=%.1fs",
-                config.VISION_MODEL, time.perf_counter() - start,
-            )
-            return resp.choices[0].message.content
-        except Exception:
-            if attempt == 0:
-                logger.warning("vision 调用失败，重试第1次", exc_info=True)
-                time.sleep(1)
-            else:
-                logger.error("vision 调用重试后仍失败", exc_info=True)
-                raise
+    # 单次尝试 + 20s per-call 超时：视觉识别正常几秒内就该回；不重试，避免
+    # 慢网络下「30s 超时 → 重试 → 再 30s」放大成 60s+，让用户干等（调用方有兜底）。
+    try:
+        start = time.perf_counter()
+        resp = get_client().with_options(timeout=20).chat.completions.create(
+            model=config.VISION_MODEL, messages=messages
+        )
+        logger.info(
+            "llm_call model=%s vision 耗时=%.1fs",
+            config.VISION_MODEL, time.perf_counter() - start,
+        )
+        return resp.choices[0].message.content
+    except Exception:
+        logger.error("vision 调用失败（不重试，走调用方兜底）", exc_info=True)
+        raise
 
 
 def embed(texts: list[str]) -> list[list[float]]:

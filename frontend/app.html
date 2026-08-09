@@ -1197,15 +1197,42 @@
     /* ---------- 食记：单张上传（③-15）+ 确认句 + 记错了？删除。
        锁定屏上传只做识别记录，不触发重算（现行为，Q2 明确保持）。
        lastMealId 声明已提到顶部状态区（refreshState 会引用它做回执重置）。 ---------- */
+    // 客户端压缩：长边缩到 1280，JPEG 0.7。返回 Blob；任何失败都 reject，由调用方退回原图。
+    function compressImage(file) {
+      return new Promise((resolve, reject) => {
+        if (!file || !file.type || !file.type.startsWith('image/')) return reject();
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const max = 1280;
+          let { width: w, height: h } = img;
+          if (w > max || h > max) {
+            if (w >= h) { h = Math.round(h * max / w); w = max; }
+            else { w = Math.round(w * max / h); h = max; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          canvas.toBlob(b => b ? resolve(b) : reject(), 'image/jpeg', 0.7);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(); };
+        img.src = url;
+      });
+    }
     document.addEventListener('change', async e => {
       const input = e.target.closest && e.target.closest('[data-photo-input]');
       if (!input || !input.files.length) return;
       const scope = toolsOf(input);
-      const form = new FormData();
-      form.append('file', input.files[0]);
       // 识别可能较慢（服务端要调视觉模型）：给个明确的进行态 + 45s 超时兜底，
       // 避免网络慢时常驻 toast 一直挂着、界面像卡死（原始反馈）。
       toast('在认这是什么…可能要等一小会儿', true);
+      // 上传前压缩：手机原图动辄 3-5MB，跨洲上传+识别都慢。压到长边 1280、JPEG 0.7，
+      // 通常能到 ~200KB，明显加快。压缩失败则退回原图（不阻塞上传）。
+      const raw = input.files[0];
+      const blob = await compressImage(raw).catch(() => raw);
+      const form = new FormData();
+      form.append('file', blob, 'meal.jpg');
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 45000);
       try {
