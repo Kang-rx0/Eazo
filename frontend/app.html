@@ -35,9 +35,19 @@
     #advTraceRow dd ul{margin:0; padding-left:16px; list-style:disc}
     #advTraceRow dd li{margin:0 0 4px; line-height:1.5}
     #advTraceRow dd li:last-child{margin-bottom:0}
-    /* 锁定屏（Q2）：印章下面的建议三行更紧凑一点，给树洞/食记留出位置 */
-    #s-accepted .plan{margin-top:14px}
-    #s-accepted .homelist{margin-top:16px}
+    /* 已定页：印章下面的建议拆成逐条独立卡片（复用印章的圆角纸张感 + 序号/核心标记，
+       克制版——硬阴影/倾角仍只留给印章，这里用轻阴影，让每条成为可快速扫读的独立单元）。
+       解散基础 .plan 的整框列表：去外框/背景/overflow，改成卡片间留白。 */
+    #s-accepted .plan{
+      margin-top:16px; border:0; border-radius:0; background:transparent; overflow:visible;
+      display:flex; flex-direction:column; gap:12px;
+    }
+    #s-accepted .plan li{
+      border:1.5px solid var(--line); border-bottom:1.5px solid var(--line);
+      border-radius:var(--r); background:var(--ink-2);
+      box-shadow:0 2px 10px rgba(0,0,0,.28);   /* 轻阴影：卡片感但不抢印章的硬阴影峰值 */
+      padding:15px 16px;
+    }
     /* 时钟条从 3 按钮扩到 7 按钮（第 1 条）：430px 单行会把日期挤成省略号，
        改成折行——时间独占一行、按钮一行，两行都完整可读 */
     .clockbar{flex-wrap:wrap; row-gap:5px; gap:6px}
@@ -261,39 +271,9 @@
           <li id="lockMove" hidden><b></b><span></span></li>
           <li id="lockStop" data-key hidden><b></b><span></span></li>
         </ol>
-        <div class="homelist" data-tools>
-          <div class="homepanel" hidden data-panel-name="free">
-            <div class="inline-row">
-              <textarea class="field" data-free-text rows="1"
-                        placeholder="比如：还是睡不着 / 胃有点不舒服"
-                        aria-label="树洞：说说今天"></textarea>
-              <button class="textlink" type="button" data-free-send>说给它</button>
-            </div>
-          </div>
-          <div class="homepanel" hidden data-panel-name="meal">
-            <p class="note">拍下今天吃的，明天的安排更贴近你</p>
-            <button class="textlink" type="button" data-photo-pick>添加照片</button>
-            <input type="file" accept="image/*" data-photo-input hidden>
-          </div>
-          <div class="homepanel" hidden data-panel-name="receipt">
-            <p class="note" data-photo-msg style="margin:8px 0 0;padding:0;border:0"></p>
-            <div class="inline-row" data-receipt-actions style="gap:16px;margin-top:2px">
-              <button class="textlink" type="button" data-receipt-dismiss>知道了</button>
-              <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
-            </div>
-          </div>
-          <div class="homegrid">
-            <button class="homecell" type="button" aria-expanded="false" data-panel="free">
-              <span class="homecell-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 4.5h13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H9l-3 3v-3H3.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.8 8h8.4M5.8 10.7h5.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
-              <span class="homecell-text">树洞</span>
-            </button>
-            <button class="homecell" type="button" aria-expanded="false" data-panel="meal">
-              <span class="homecell-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.2 5.5 8 4h4l.8 1.5H16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.5"/></svg></span>
-              <span class="homecell-text">食记</span>
-            </button>
-          </div>
-        </div>
-        <p class="voice">有变化随时说一句，不用回我。</p>
+        <!-- 「今晚已定」＝用户唯一要参与的决定已完成：树洞/食记/「有变化随时说一句」是
+             Home 的补充输入层，不再占据已定页；只留一个低调的回首页出口（要补充就回 Home）。 -->
+        <button class="textlink" type="button" id="acceptedHome" style="display:block;margin:22px auto 0;opacity:.6">回首页</button>
       </div>
     </section>
 
@@ -1268,6 +1248,8 @@
     });
     // 安全结束页「回到首页」：只切回 home（当天建议仍是 danger/crisis，下次进来 state 仍会判回安全结束页）
     document.getElementById('safetyExitHome').addEventListener('click', () => show('home'));
+    // 已定页「回首页」：切回 home 做补充（锁定态仍有效，下次进来 state 仍会判回已定页）
+    document.getElementById('acceptedHome').addEventListener('click', () => show('home'));
 
     /* ---------- 补充一句（noteSheet）/ 树洞 → /api/free_input ---------- */
     // generateIfNone：当天还没建议时，是否接着生成今晚安排。
@@ -1611,6 +1593,9 @@
         document.title='CONFIRM 按钮文案="'+(btn?btn.textContent:'?')+'" 底部toast显示='+!!toastShown+' 按钮禁用='+(btn&&btn.disabled);
       },200);
     },1200);}
+
+
+
 
 
 
