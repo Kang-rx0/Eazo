@@ -1539,6 +1539,12 @@
         history.replaceState(null, '', location.pathname);   // 清掉参数，避免刷新/后退再触发
         if (activeScreen === 'home' || activeScreen === 'advice') await startNight();
       }
+      // 从资料页返回（app.html#settings）：稳稳落回设置屏，而不是 home（问题2）。
+      // 仅在落到 home/advice 这类常规屏时接管，rejected/锁定屏等安全路由优先。
+      if (location.hash === '#settings') {
+        history.replaceState(null, '', location.pathname);   // 清掉锚点，避免刷新残留
+        if (activeScreen === 'home' || activeScreen === 'advice') show('settings');
+      }
     })();
   
 

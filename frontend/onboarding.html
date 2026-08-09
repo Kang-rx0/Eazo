@@ -300,10 +300,9 @@
       if (stepIdx > 0) show(STEPS[stepIdx - 1]);
     });
     function leaveEdit() {
-      // 从设置进来的（app.html）就回去；直接开的就去主界面
-      if (document.referrer && new URL(document.referrer).origin === location.origin
-          && document.referrer.includes('app.html')) history.back();
-      else location.href = 'app.html';
+      // 资料页都是从设置进来的：回到 app.html 并用 #settings 锚点稳稳落回设置屏
+      //（不用 history.back——app.html 会重新加载并 refreshState 到 home，丢掉"我在设置"这个状态，问题2）。
+      location.href = 'app.html#settings';
     }
 
     /* ---------- chips / opts 通用选择 ----------
