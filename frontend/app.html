@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>值夜</title>
+  <title>Lite Me</title>
   <link rel="stylesheet" href="nightwatch.css">
   <!-- 主题预设：在样式应用前尽早读取，避免开屏先暗后亮的闪烁 -->
   <script>if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-preload-light','1');</script>
@@ -53,8 +53,8 @@
     <div class="badge">
       <div class="face" id="face" data-mood="happy" aria-hidden="true"><i class="l"></i><i class="r"></i><u></u></div>
       <div>
-        <b>值夜</b>
-        <s>今晚值班</s>
+        <b>Lite Me</b>
+        <s>人类省电模式</s>
       </div>
     </div>
     <button class="avatar" type="button" id="navGear" aria-label="我的设置" hidden>
@@ -105,7 +105,7 @@
               <textarea class="field" data-free-text rows="1"
                         placeholder="比如：没吃午饭 / 明早早起"
                         aria-label="树洞：说说今天"></textarea>
-              <button class="textlink" type="button" data-free-send style="align-self:center">说给它</button>
+              <button class="textlink" type="button" data-free-send>说给它</button>
             </div>
           </div>
           <div class="homepanel" hidden data-panel-name="meal">
@@ -129,6 +129,9 @@
             </button>
           </div>
         </div>
+        <!-- 饮食记录常驻列表：上传后在 home 留一条「HH:MM 记了一条饮食：XX」，
+             让用户看得见传成功了（不只是转瞬即逝的回执）。由 refreshState 按 today_meals 渲染。 -->
+        <ul class="meallog" id="mealLog" hidden></ul>
         <p class="voice">今晚，留一件小事给自己。</p>
       </div>
       <div class="foot">
@@ -256,7 +259,7 @@
               <textarea class="field" data-free-text rows="1"
                         placeholder="比如：还是睡不着 / 胃有点不舒服"
                         aria-label="树洞：说说今天"></textarea>
-              <button class="textlink" type="button" data-free-send style="align-self:center">说给它</button>
+              <button class="textlink" type="button" data-free-send>说给它</button>
             </div>
           </div>
           <div class="homepanel" hidden data-panel-name="meal">
@@ -362,7 +365,7 @@
         <p class="setgroup">关于</p>
         <ul class="setlist">
           <li><button class="setrow" type="button" id="aboutEntry">
-            <span class="lab"><b>值夜是什么</b></span><span class="chev">›</span>
+            <span class="lab"><b>Lite Me 是什么</b></span><span class="chev">›</span>
           </button></li>
           <li><div class="setrow" style="cursor:default">
             <span class="lab"><b>版本</b></span><span class="val">V3 整合版</span>
@@ -384,7 +387,7 @@
     <!-- ========== 关于：按真实行为写（③-2/12），不写"全存本机"这类不实描述 ========== -->
     <section class="screen" id="s-about">
       <div class="body">
-        <h1>值夜<br>是什么</h1>
+        <h1>Lite Me<br>是什么</h1>
         <p class="setgroup">它会做什么</p>
         <p class="sub">每晚按你的情况和当天状态，给一条足够小的安排——吃什么、动多久、几点停。你说一句就能改，做不完它把线放低，不记账。</p>
         <p class="setgroup">它不做什么</p>
@@ -680,6 +683,7 @@
         lastMealId = null;
         document.querySelectorAll('[data-panel-name="receipt"]').forEach(p => p.hidden = true);
       }
+      renderMealLog(state);   // home 常驻饮食记录列表
       if (state.view === 'advice') renderAdvice(state.today_advice);
       // 夜间闭环：锁定态还有效吗？安全升级到 danger/crisis 时强制退出锁定（安全永远赢过锁定）
       const a = state.view === 'advice' ? state.today_advice : null;
@@ -724,6 +728,31 @@
       document.getElementById('recallQuestion').textContent =
         `昨晚那条「${a.move || a.stop || a.judgement || '建议'}」，做到了吗`;
       card.hidden = false;
+    }
+
+    /* ---------- home 饮食记录常驻列表：上传成功后看得见「几点记了什么」，
+       不再像没传一样。按 today_meals（当天）渲染，跨天自动清空。 ---------- */
+    function renderMealLog(state) {
+      const log = document.getElementById('mealLog');
+      if (!log) return;
+      const meals = (state && state.today_meals) || [];
+      if (!meals.length) { log.hidden = true; log.innerHTML = ''; return; }
+      log.innerHTML = '';
+      meals.forEach(m => {
+        const food = m.food || {};
+        // 识别失败的条目（recognized===false）诚实标注，不假装认出了具体食物
+        const failed = food.recognized === false;
+        const li = document.createElement('li');
+        const t = document.createElement('b');
+        t.textContent = m.vtime;   // 后端已存 HH:MM 字符串，直接用（勿再套 hm()）
+        const s = document.createElement('span');
+        s.textContent = failed
+          ? ' 记了一条饮食（没认清）'
+          : ` 记了一条饮食：${food.名称 || food.name || '一条饮食'}`;
+        li.append(t, s);
+        log.appendChild(li);
+      });
+      log.hidden = false;
     }
 
     /* ---------- 回顾卡（②-20）：四档+跳过，答完按上下文继续 ---------- */

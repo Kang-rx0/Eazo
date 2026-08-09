@@ -661,10 +661,13 @@ async def api_meal_photo(file: UploadFile, request: Request):
         food = json.loads(m.group(0)) if m else None
     except Exception:
         food = None
-    if not food or not food.get("名称"):
-        # 兜底：识别失败也不报错、不阻塞（文档：演示中途不允许白屏或报错）
+    recognized = bool(food and food.get("名称"))
+    if not recognized:
+        # 兜底：识别失败也不报错、不阻塞（文档：演示中途不允许白屏或报错）。
+        # 用中性诚实措辞，不预设餐类（不硬叫「一餐饭/家常」，用户可能拍的是下午茶/水果/加餐）。
         logger.error("user=%s vision识别失败，走兜底", username)
-        food = {"名称": "一餐饭", "估计分量": "未知", "类别": "家常", "备注": "识别失败，仅记录用餐"}
+        food = {"名称": "没认清的一条", "估计分量": "未知", "类别": "未知",
+                "备注": "没能识别，仅作记录", "recognized": False}
 
     db_conn = db.get_conn()
     try:
@@ -678,10 +681,13 @@ async def api_meal_photo(file: UploadFile, request: Request):
         db_conn.commit()
     finally:
         db_conn.close()
-    logger.info("user=%s event=meal_photo 识别=%s", username, food.get("名称"))
-    # 轻确认，不评判、不展开（文档 7.3）；带 meal_id 供「记错了？删除」
-    return {"ok": True, "meal_id": meal_id, "food": food,
-            "message": f"记下了：{food['名称']}。晚上给你参考。"}
+    logger.info("user=%s event=meal_photo 识别=%s recognized=%s", username, food.get("名称"), recognized)
+    # 轻确认，不评判、不展开（文档 7.3）；带 meal_id 供「记错了？删除」。
+    # 识别失败时诚实告知，不假装认出来（用户可删/重传）。
+    message = (f"记下了：{food['名称']}。晚上给你参考。" if recognized
+               else "没太认出来，先记了一条。不对的话点下面删掉、或换张清楚的再传。")
+    return {"ok": True, "meal_id": meal_id, "food": food, "recognized": recognized,
+            "message": message}
 
 
 @app.post("/api/meal/delete")

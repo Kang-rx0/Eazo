@@ -87,7 +87,7 @@ body{
   padding:calc(14px + env(safe-area-inset-top)) 18px 10px;
   display:flex; align-items:center; gap:10px;
 }
-.badge{display:flex; align-items:center; gap:9px; min-width:0}
+.badge{display:flex; align-items:center; gap:9px; min-width:0; flex:1 1 auto}
 /* 人像：34×34、11px 圆角（唯一例外档），纯 CSS 画两眼一嘴 */
 .face{
   position:relative; flex:0 0 auto;
@@ -729,6 +729,13 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
   max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   font-size:14.5px; line-height:1.5; font-weight:600;
 }
+/* 饮食记录常驻列表：轻量、不抢戏；时间用琥珀，正文用次要色 */
+.meallog{list-style:none; margin:14px 0 0; padding:0; display:flex; flex-direction:column; gap:6px}
+.meallog li{
+  font-size:13px; line-height:1.5; color:var(--muted);
+  padding:7px 11px; background:var(--ink-2); border:1px solid var(--line); border-radius:12px;
+}
+.meallog li b{color:var(--amber); font-weight:600; font-family:var(--mono); font-size:12.5px}
 .homepanel{
   --bubble-anchor:25%;
   position:relative; margin:0; padding:9px 15px;
@@ -744,20 +751,33 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
   bottom:-9px; left:calc(var(--bubble-anchor) - 7px);
   width:14px; height:10px; background:var(--ink-2);
 }
-.homepanel[data-bubble="meal"]{--bubble-anchor:75%}
-.homepanel .inline-row{position:relative}
+/* 箭头锚点跟随被点的格子：树洞=左格(默认25%)，食记/回执=右格(75%)。
+   选择器对齐实际属性名 data-panel-name（旧的 data-bubble 已被重构掉，故箭头一直指左格）。 */
+.homepanel[data-panel-name="meal"],
+.homepanel[data-panel-name="receipt"]{--bubble-anchor:75%}
+.homepanel .inline-row{position:relative; display:flex; align-items:center; gap:10px}
 .homepanel .field{
-  min-height:52px; padding:14px 34px 14px 0;
+  min-height:52px; padding:12px 4px 12px 0;
   background:transparent; border:0; border-radius:0;
 }
 .homepanel textarea.field{min-height:52px}
+/* 树洞输入聚焦：不套全局那圈刺眼的 3px 薄荷绿描边（既丑又跳色），
+   改成气泡容器本身描边提亮 + 轻微背景，安静地表示"在这里输入"。 */
+.homepanel:focus-within{border-color:var(--amber); background:var(--ink-3)}
+.homepanel .field:focus,
+.homepanel .field:focus-visible{outline:none}
+/* 送出按钮：不换行、够宽、垂直居中，跟输入框一行对齐 */
+.homepanel[data-panel-name="free"] .textlink{
+  flex:0 0 auto; white-space:nowrap; align-self:center;
+  min-height:40px; padding:8px 4px; font-weight:600;
+}
 .homepanel .mic{
   position:absolute; right:0; top:50%; transform:translateY(-50%);
 }
 .homepanel .note{margin:0; padding-top:0; border-top:0}
-.homepanel[data-bubble="meal"]{display:flex; align-items:center; gap:8px; min-height:52px}
-.homepanel[data-bubble="meal"] .note{flex:1 1 auto}
-.homepanel[data-bubble="meal"] .textlink{flex:0 0 auto; min-height:32px; padding:6px 0}
+.homepanel[data-panel-name="meal"]{display:flex; align-items:center; gap:8px; min-height:52px}
+.homepanel[data-panel-name="meal"] .note{flex:1 1 auto}
+.homepanel[data-panel-name="meal"] .textlink{flex:0 0 auto; min-height:32px; padding:6px 0}
 .photothumbs{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0}
 .photothumbs img{
   width:56px; height:56px; border-radius:12px; border:1px solid var(--line);
