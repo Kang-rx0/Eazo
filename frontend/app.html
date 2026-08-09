@@ -116,7 +116,7 @@
           <!-- 拍照回执独立一行：确认句 + 「记错了？删除」（③-15 单张） -->
           <div class="homepanel" hidden data-panel-name="receipt">
             <p class="note" data-photo-msg style="margin:8px 0 0;padding:0;border:0"></p>
-            <div class="inline-row" style="gap:16px;margin-top:2px">
+            <div class="inline-row" data-receipt-actions style="gap:16px;margin-top:2px">
               <button class="textlink" type="button" data-receipt-dismiss>知道了</button>
               <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
             </div>
@@ -272,7 +272,7 @@
           </div>
           <div class="homepanel" hidden data-panel-name="receipt">
             <p class="note" data-photo-msg style="margin:8px 0 0;padding:0;border:0"></p>
-            <div class="inline-row" style="gap:16px;margin-top:2px">
+            <div class="inline-row" data-receipt-actions style="gap:16px;margin-top:2px">
               <button class="textlink" type="button" data-receipt-dismiss>知道了</button>
               <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
             </div>
@@ -512,6 +512,8 @@
     let pendingOffworkPayload;   // 回执答完后继续生成用
     let recallRecordId = null;
     let lastMealId = null;       // 最近一张食记的 id（回执删除/跨天重置用）
+    let _loadingBtn = null;      // 生成进行态占用的按钮（结束时恢复原文案）
+    let _loadingBtnText = '';
 
     /* ---------- 基础件 ---------- */
     let toastTimer = null;
@@ -525,10 +527,28 @@
     function hideToast() { document.getElementById('toast').removeAttribute('data-show'); }
 
     function setLoading(on) {
-      // 安全出口也纳入禁用：生成中再点只会多一次无效往返（后端有锁，但别诱导双击）
+      // 生成进行态直接占用「当前屏主按钮」本身（文案变「正在想…」），不再浮一个框盖在按钮上方。
+      // 安全出口也一并禁用：生成中再点只多一次无效往返（后端有锁，但别诱导双击）。
+      const foot = document.querySelector(`#s-${activeScreen} .foot`);
+      const primary = foot && foot.querySelector('.btn.primary');
       document.querySelectorAll('.foot .btn.primary, .foot .safety').forEach(b => b.disabled = on);
-      if (on) toast('正在想今晚怎么安排，大约十几秒…', true);
-      else hideToast();
+      if (on) {
+        if (primary) {
+          _loadingBtn = primary;
+          _loadingBtnText = primary.textContent;
+          primary.textContent = '正在想今晚怎么安排，大约十几秒…';
+          primary.setAttribute('aria-busy', 'true');
+        } else {
+          toast('正在想今晚怎么安排，大约十几秒…', true);   // 没有主按钮的屏（兜底）
+        }
+      } else {
+        if (_loadingBtn) {
+          _loadingBtn.textContent = _loadingBtnText;
+          _loadingBtn.removeAttribute('aria-busy');
+          _loadingBtn = null; _loadingBtnText = '';
+        }
+        hideToast();
+      }
     }
 
     async function api(path, body) {
@@ -1236,9 +1256,13 @@
       const input = e.target.closest && e.target.closest('[data-photo-input]');
       if (!input || !input.files.length) return;
       const scope = toolsOf(input);
-      // 识别可能较慢（服务端要调视觉模型）：给个明确的进行态 + 45s 超时兜底，
-      // 避免网络慢时常驻 toast 一直挂着、界面像卡死（原始反馈）。
-      toast('在认这是什么…可能要等一小会儿', true);
+      // 识别可能较慢（服务端要调视觉模型）+ 45s 超时兜底。进行态直接放进回执气泡里
+      //（结果本来就出现在这），不再浮一个框盖在按钮上方。识别中先藏掉「知道了/删除」。
+      const receipt = pick(scope, '[data-panel-name="receipt"]');
+      pick(scope, '[data-photo-msg]').textContent = '在认这是什么…可能要等一小会儿';
+      const actions = pick(scope, '[data-receipt-actions]');
+      if (actions) actions.hidden = true;
+      if (receipt) receipt.hidden = false;
       // 上传前压缩：手机原图动辄 3-5MB，跨洲上传+识别都慢。压到长边 1280、JPEG 0.7，
       // 通常能到 ~200KB，明显加快。压缩失败则退回原图（不阻塞上传）。
       const raw = input.files[0];
@@ -1255,19 +1279,22 @@
           signal: ctrl.signal,
         });
         const data = await res.json();
-        if (!res.ok || !data.ok) { toast(data.error || '没认出来，晚点再试'); return; }
+        // 失败走 throw → catch 里收起进行态气泡（不能 return，否则半截气泡留在屏上）
+        if (!res.ok || !data.ok) { throw new Error(data.error || 'fail'); }
         lastMealId = data.meal_id;
         pick(scope, '[data-photo-msg]').textContent = data.message;
-        pick(scope, '[data-panel-name="receipt"]').hidden = false;
+        if (actions) actions.hidden = false;   // 识别完成，恢复「知道了/删除」
         // 立即刷新，让 home 常驻记录马上出现（不必等下次时钟/操作触发 refreshState）。
         // 此时 today_meals 必非空，不会误触发「空则收起回执」逻辑。
         await refreshState();
       } catch (err) {
-        toast(err.name === 'AbortError' ? '这张认得有点久，先跳过，晚点再试' : '网络不太稳，照片没传上，再试一次');
+        // 识别失败：收起进行态回执气泡（没成功就别留半截），用 toast 说明
+        if (receipt) receipt.hidden = true;
+        if (actions) actions.hidden = false;   // 复位，供下次上传
+        toast(err.name === 'AbortError' ? '这张认得有点久，先跳过，晚点再试' : '没认出来，晚点再试');
       } finally {
         clearTimeout(timer);
         input.value = '';
-        hideToast();   // 无论成功失败/超时，进行态一定收起
       }
     });
     async function deleteMeal(scope) {
@@ -1447,6 +1474,23 @@
       }
     })();
   
+
+
+    if(new URLSearchParams(location.search).get('loadtest')==='1'){setTimeout(()=>{
+      // 此时应已在 confirm 屏(firstnight);点「判断大致没错」触发 doOffwork→setLoading(true)
+      const btn=document.getElementById('confirmOk');
+      const before=btn?btn.textContent:'?';
+      if(btn)btn.click();
+      // 立刻查按钮文案(setLoading同步执行,fetch还没回来)
+      setTimeout(()=>{
+        const toastEl=document.getElementById('toast');
+        const toastShown=toastEl&&toastEl.hasAttribute('data-show');
+        document.title='CONFIRM 按钮文案="'+(btn?btn.textContent:'?')+'" 底部toast显示='+!!toastShown+' 按钮禁用='+(btn&&btn.disabled);
+      },200);
+    },1200);}
+
+
+
 
 </script>
 </body>
