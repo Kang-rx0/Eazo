@@ -27,7 +27,18 @@
     .bandlabel span{white-space:nowrap}
     .bandlabel span:last-child{text-align:right}
     .homepanel .textlink{min-height:36px; padding:6px 8px}
-    #photoMsg{margin:8px 0 0; padding:0; border:0}
+    /* 「怎么想的」= 合并进来的 trace 列表，套在 .srcs 的 dd 里 */
+    #advTraceRow dd ul{margin:0; padding-left:16px; list-style:disc}
+    #advTraceRow dd li{margin:0 0 4px; line-height:1.5}
+    #advTraceRow dd li:last-child{margin-bottom:0}
+    /* 锁定屏（Q2）：印章下面的建议三行更紧凑一点，给树洞/食记留出位置 */
+    #s-accepted .plan{margin-top:14px}
+    #s-accepted .homelist{margin-top:16px}
+    /* 时钟条从 3 按钮扩到 7 按钮（第 1 条）：430px 单行会把日期挤成省略号，
+       改成折行——时间独占一行、按钮一行，两行都完整可读 */
+    .clockbar{flex-wrap:wrap; row-gap:5px; gap:6px}
+    .clockbar b{flex:1 1 100%}
+    .clockbar button{padding:4px 7px}
   </style>
 </head>
 <body>
@@ -65,14 +76,9 @@
           </div>
         </div>
 
-        <!-- 昨晚回执状态行（②-21）：已答过时显示，可改 -->
-        <p class="note" id="yesterdayLine" hidden>
-          昨晚记为「<span id="yesterdayFb"></span>」
-          <button class="textlink" type="button" id="yesterdayEdit" style="min-height:32px;padding:4px 8px">点错了？改</button>
-        </p>
-
-        <!-- 回顾卡（②-20）：不在 Home 常驻（③-8），offwork 返回 need_feedback 或点「点错了？改」时出现。
-             显示队友文案，值用后端四档+跳过 -->
+        <!-- 回顾卡（第 9 条）：改为 Home 常驻——有待回执（/api/state 的 pending_feedback）就直接在这里问，
+             不再等点「开始今晚」才弹。答完整卡消失、不留任何残留框。
+             原来的常驻行「昨晚记为『X』点错了？改」已按第 9 条移除，纠错入口搬到 设置 → 回看（Q4） -->
         <div class="recall" id="recallCard" hidden>
           <p id="recallQuestion">昨晚那条，做到了吗</p>
           <div class="opts">
@@ -86,32 +92,34 @@
           <button class="textlink" type="button" data-fb="跳过">跳过</button>
         </div>
 
-        <!-- 树洞 / 食记（②-22/23）：两格入口 + 气泡面板 -->
-        <div class="homelist">
-          <div class="homepanel" id="accFreeHome" hidden data-bubble="free">
+        <!-- 树洞 / 食记（②-22/23）：两格入口 + 气泡面板。
+             锁定屏（Q2）要原样保留这两个入口，所以整块做成"可复制"的：
+             内部一律用 data-* 定位、JS 按 [data-tools] 就近取，不用全局 id（复制后 id 会撞车） -->
+        <div class="homelist" data-tools>
+          <div class="homepanel" hidden data-panel-name="free">
             <div class="inline-row">
-              <textarea class="field" id="freeTextHome" rows="1"
+              <textarea class="field" data-free-text rows="1"
                         placeholder="比如：没吃午饭 / 明早早起"
                         aria-label="树洞：说说今天"></textarea>
-              <button class="textlink" type="button" id="freeSendHome" style="align-self:center">说给它</button>
+              <button class="textlink" type="button" data-free-send style="align-self:center">说给它</button>
             </div>
           </div>
-          <div class="homepanel" id="accPhotoHome" hidden data-bubble="meal">
-            <p class="note" id="photoPrompt">拍下今天吃的，晚餐建议更贴近你</p>
-            <button class="textlink" type="button" id="photoPick">添加照片</button>
-            <input type="file" accept="image/*" id="photoInput" hidden>
+          <div class="homepanel" hidden data-panel-name="meal">
+            <p class="note">拍下今天吃的，晚餐建议更贴近你</p>
+            <button class="textlink" type="button" data-photo-pick>添加照片</button>
+            <input type="file" accept="image/*" data-photo-input hidden>
           </div>
           <!-- 拍照回执独立一行：确认句 + 「记错了？删除」（③-15 单张） -->
-          <div class="homepanel" id="photoReceipt" hidden data-bubble="meal">
-            <p class="note" id="photoMsg"></p>
-            <button class="textlink" type="button" id="photoDelete">记错了？删除</button>
+          <div class="homepanel" hidden data-panel-name="receipt">
+            <p class="note" data-photo-msg style="margin:8px 0 0;padding:0;border:0"></p>
+            <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
           </div>
           <div class="homegrid">
-            <button class="homecell" type="button" aria-expanded="false" data-panel="accFreeHome">
+            <button class="homecell" type="button" aria-expanded="false" data-panel="free">
               <span class="homecell-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 4.5h13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H9l-3 3v-3H3.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.8 8h8.4M5.8 10.7h5.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
               <span class="homecell-text">树洞</span>
             </button>
-            <button class="homecell" type="button" aria-expanded="false" data-panel="accPhotoHome">
+            <button class="homecell" type="button" aria-expanded="false" data-panel="meal">
               <span class="homecell-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.2 5.5 8 4h4l.8 1.5H16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.5"/></svg></span>
               <span class="homecell-text">食记</span>
             </button>
@@ -151,7 +159,9 @@
             <button class="textlink" type="button" data-adjust>改一下</button>
           </div>
         </dl>
-        <p class="voice">都是我估的，不对就改。</p>
+        <!-- Q1：今晚建议已生成时，三处「改一下」置灰 + 这一行提示（不做后端强制重算） -->
+        <p class="note" id="confirmLocked" hidden>今晚已生成，要改走「我要补充」。</p>
+        <p class="voice" id="confirmVoice">都是我估的，不对就改。</p>
       </div>
       <div class="foot">
         <button class="btn primary" type="button" id="confirmOk">判断大致没错</button>
@@ -196,43 +206,87 @@
 
         <p class="voice" id="adviceVoice">不合适就说，我来改。</p>
 
-        <!-- 理由行（source-row，默认收起）：reason + sources -->
+        <!-- 「为什么是这条线」：用户反馈原来的「为什么是这条线」与「它是怎么得出这个建议的」
+             两个折叠块观感重复，合并成一块三行——依据(reason) / 来源(sources) / 怎么想的(trace)。
+             信息一条不丢，trace 的安全层行照旧天然带出（②-24） -->
         <div class="srcs">
           <button type="button" aria-expanded="false" data-acc="advWhy">为什么是这条线</button>
           <dl id="advWhy" hidden>
             <div><dt>依据</dt><dd id="advReason"></dd></div>
             <div id="advSourcesRow" hidden><dt>来源</dt><dd id="advSources"></dd></div>
+            <div id="advTraceRow"><dt>怎么想的</dt><dd><ul id="tracePanel"></ul></dd></div>
           </dl>
-        </div>
-
-        <!-- trace（②-24）：渲染 /api/agent_trace steps，安全层行天然带出 -->
-        <div class="acc">
-          <button type="button" aria-expanded="false" data-acc="tracePanel">它是怎么得出这个建议的</button>
-          <ul id="tracePanel" hidden></ul>
         </div>
 
         <p class="note" id="advDisclaimer" hidden></p>
       </div>
       <div class="foot">
         <button class="btn primary" type="button" id="acceptBtn">就这样</button>
+        <!-- 第 6 条：安全出口收敛到 Home + s-confirm 两处，结论屏这里移除。
+             「我要补充」走的是同一条 /api/free_input 管道、同样全量过三层安全检测（Q3 已确认不算降级） -->
         <button class="btn ghost" type="button" data-note-open>我要补充</button>
-        <button class="safety" type="button" data-safety-exit>身体不舒服</button>
       </div>
     </section>
 
-    <!-- ========== 印章屏（①-8/③-17）：不写任何本地历史 ========== -->
+    <!-- ========== 锁定屏「今晚已定」（第 7.2 条 + Q2）：接受之后的死胡同。
+         无返回、无齿轮、无 foot 按钮（时钟条保留，演示需要）；
+         但保留树洞 + 食记两个入口——树洞说一句会重算，锁定屏上的建议行同步刷新；
+         若安全升级到 danger/crisis 则整屏退出锁定态转 sober 卡（安全永远赢过锁定）。
+         接受状态不落库（维持 ①-8）：localStorage 记 accepted_vday，凌晨 4 点后失效 ========== -->
     <section class="screen" id="s-accepted">
       <div class="body">
         <p class="clock" id="acceptedClock">--:--</p>
         <div class="stamp">
-          <em>今晚已记下</em>
+          <em>今晚已定</em>
           <h1 id="stampLine"></h1>
           <p>别的今晚都不算数。</p>
         </div>
-        <p class="voice">有变化随时回来改，不用回我。</p>
+        <ol class="plan" id="lockPlan">
+          <li id="lockEat" hidden><b></b><span></span></li>
+          <li id="lockMove" hidden><b></b><span></span></li>
+          <li id="lockStop" data-key hidden><b></b><span></span></li>
+        </ol>
+        <div class="homelist" data-tools>
+          <div class="homepanel" hidden data-panel-name="free">
+            <div class="inline-row">
+              <textarea class="field" data-free-text rows="1"
+                        placeholder="比如：还是睡不着 / 胃有点不舒服"
+                        aria-label="树洞：说说今天"></textarea>
+              <button class="textlink" type="button" data-free-send style="align-self:center">说给它</button>
+            </div>
+          </div>
+          <div class="homepanel" hidden data-panel-name="meal">
+            <p class="note">拍下今天吃的，明天的安排更贴近你</p>
+            <button class="textlink" type="button" data-photo-pick>添加照片</button>
+            <input type="file" accept="image/*" data-photo-input hidden>
+          </div>
+          <div class="homepanel" hidden data-panel-name="receipt">
+            <p class="note" data-photo-msg style="margin:8px 0 0;padding:0;border:0"></p>
+            <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
+          </div>
+          <div class="homegrid">
+            <button class="homecell" type="button" aria-expanded="false" data-panel="free">
+              <span class="homecell-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 4.5h13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H9l-3 3v-3H3.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.8 8h8.4M5.8 10.7h5.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+              <span class="homecell-text">树洞</span>
+            </button>
+            <button class="homecell" type="button" aria-expanded="false" data-panel="meal">
+              <span class="homecell-icon" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.2 5.5 8 4h4l.8 1.5H16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.5"/></svg></span>
+              <span class="homecell-text">食记</span>
+            </button>
+          </div>
+        </div>
+        <p class="voice">有变化随时说一句，不用回我。</p>
       </div>
-      <div class="foot">
-        <button class="btn primary" type="button" id="acceptedBack">好，先这样</button>
+    </section>
+
+    <!-- ========== 鼓励屏（第 7.2 条，Q6 定稿文案，纯代码固定、不调模型）：
+         睡点弹窗点「好」之后进来。无返回、无按钮，只有时钟条 ========== -->
+    <section class="screen" id="s-done">
+      <div class="body">
+        <p class="clock" id="doneClock">--:--</p>
+        <p class="tag">今晚结束</p>
+        <h1>今晚这一件<br>你做到了</h1>
+        <p class="voice">不用回我。睡吧，明天见。</p>
       </div>
     </section>
 
@@ -334,8 +388,12 @@
   <!-- 虚拟时钟控制条（②-25）：演示道具，常驻 -->
   <div class="clockbar" id="clockBar">
     <b id="clockDisplay">加载中…</b>
-    <button type="button" data-clock='{"advance_hours":1}'>+1小时</button>
-    <button type="button" data-clock='{"advance_days":1}'>下一天</button>
+    <button type="button" data-clock='{"advance_days":-1}'>−1d</button>
+    <button type="button" data-clock='{"advance_hours":-1}'>−1h</button>
+    <button type="button" data-clock='{"advance_minutes":-10}'>−10m</button>
+    <button type="button" data-clock='{"advance_minutes":10}'>+10m</button>
+    <button type="button" data-clock='{"advance_hours":1}'>+1h</button>
+    <button type="button" data-clock='{"advance_days":1}'>+1d</button>
     <button type="button" data-clock='{"reset":true}'>重置</button>
   </div>
 
@@ -392,6 +450,34 @@
     <button class="btn primary" type="button" id="calSave">按这个重新算</button>
   </section>
 
+  <!-- 身体不舒服（第 6 条）：说一句 → /api/free_input 存句子 → 生成/重算。
+       句子进【今天已知】并全量过三层安全检测，danger/crisis 由后端判定、前端零词表零判断 -->
+  <section class="calibration-sheet" id="bodySheet" role="dialog" aria-modal="true" hidden>
+    <h2>哪里不舒服</h2>
+    <p>说一句就行，我按这个重新安排今晚。</p>
+    <div class="calgroup">
+      <p>说一句</p>
+      <div class="inline-row">
+        <textarea class="field" id="bodyText" rows="2"
+                  placeholder="比如：头有点晕 / 胃不太舒服 / 嗓子疼"
+                  aria-label="哪里不舒服"></textarea>
+      </div>
+      <button class="btn primary" type="button" id="bodySubmit">提交</button>
+    </div>
+  </section>
+
+  <!-- 睡点弹窗（第 7.2 条）：锁定屏上到了睡点弹一次。文案定稿，纯代码固定 -->
+  <div class="scrim" id="sleepScrim" hidden></div>
+  <div class="modalwrap" id="sleepWrap" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sleepTitle">
+      <h2 id="sleepTitle">到点了</h2>
+      <p>放下手机，去睡吧。今晚就到这里。</p>
+      <div class="acts">
+        <button class="btn primary" type="button" id="sleepOk">好</button>
+      </div>
+    </div>
+  </div>
+
   <p class="toast" id="toast" role="status"></p>
 
   <script>
@@ -431,11 +517,13 @@
     }
 
     /* ---------- 多屏骨架：返回箭头/齿轮按屏配置（齿轮只挂 Home） ---------- */
-    const BACK_TO = { 'confirm': 'home', 'settings': 'home',
-                      'history': 'settings', 'about': 'settings' };   // 其余屏不给返回
+    // 返回链（第 2 条）：advice→confirm 新增；accepted/bye/rejected/done 是死胡同，不给返回
+    const BACK_TO = { 'confirm': 'home', 'advice': 'confirm', 'settings': 'home',
+                      'history': 'settings', 'about': 'settings' };
     let activeScreen = 'home';
     function show(name) {
       activeScreen = name;
+      if (name === 'confirm') applyConfirmLock();
       document.querySelectorAll('.screen').forEach(s =>
         s.id === 's-' + name ? s.setAttribute('data-active', '') : s.removeAttribute('data-active'));
       document.getElementById('navBack').hidden = !(name in BACK_TO);
@@ -443,7 +531,18 @@
       const body = document.querySelector(`#s-${name} .body`);
       if (body) body.scrollTop = 0;
     }
-    document.getElementById('navBack').addEventListener('click', () => show(BACK_TO[activeScreen] || 'home'));
+    /* Q1：今晚建议已生成 → confirm 屏三处「改一下」置灰 + 提示行，改走「我要补充」 */
+    function applyConfirmLock() {
+      const locked = !!currentAdvice;
+      document.querySelectorAll('#s-confirm [data-adjust]').forEach(b => { b.disabled = locked; b.hidden = locked; });
+      document.getElementById('confirmLocked').hidden = !locked;
+      document.getElementById('confirmVoice').hidden = locked;
+    }
+    document.getElementById('navBack').addEventListener('click', () => {
+      const target = BACK_TO[activeScreen] || 'home';
+      if (target === 'confirm' && !renderConfirm()) { show('home'); return; }   // 拿不到 hint 就退回 Home
+      show(target);
+    });
     document.getElementById('navGear').addEventListener('click', () => show('settings'));
 
     /* ---------- 抽屉开合 ---------- */
@@ -498,46 +597,113 @@
       document.getElementById('homeGreeting').textContent = greetingFor(state.virtual_now);
       document.getElementById('confirmClock').textContent = t + ' · 先对一下';
       document.getElementById('adviceClock').textContent = t;
-      document.getElementById('acceptedClock').textContent = t + ' · 记下了';
+      document.getElementById('acceptedClock').textContent = t + ' · 今晚已定';
+      document.getElementById('doneClock').textContent = t;
       document.getElementById('byeClock').textContent = t + ' · 今晚不安排';
     }
 
-    /* ---------- 开屏/刷新：一切以 /api/state 为准（③-3/③-6） ---------- */
-    async function refreshState() {
+    /* ---------- 夜间闭环状态（第 7.2/8 条）：接受状态不落库（①-8），只记 localStorage。
+       Q5：新一天回初始页的时间点是凌晨 04:00 —— 所以"跨过零点但还没到 4 点"时锁定继续有效，
+       否则 23:50 接受、00:10 就被弹回首页，夜还没过完。 ---------- */
+    const ACCEPTED_KEY = 'accepted_vday', DONE_KEY = 'night_done_vday';
+    function isNextDay(prev, cur) {
+      const a = new Date(prev + 'T00:00:00'), b = new Date(cur + 'T00:00:00');
+      return Math.round((b - a) / 86400000) === 1;
+    }
+    function acceptedValid(state) {
+      const v = localStorage.getItem(ACCEPTED_KEY);
+      if (!v || !state) return false;
+      if (state.vday === v) return true;
+      return new Date(state.virtual_now).getHours() < 4 && isNextDay(v, state.vday);
+    }
+    function clearNight() {
+      localStorage.removeItem(ACCEPTED_KEY);
+      localStorage.removeItem(DONE_KEY);
+    }
+    function nightDone(state) {
+      return acceptedValid(state) && localStorage.getItem(DONE_KEY) === localStorage.getItem(ACCEPTED_KEY);
+    }
+    /* 锁定屏上的建议三行：只读渲染，树洞重算后跟着刷新 */
+    function renderLock(a) {
+      if (!a) return;
+      document.getElementById('stampLine').textContent = a.stop || a.judgement || '今晚从简';
+      const setLine = (id, text) => {
+        const li = document.getElementById(id);
+        li.hidden = !text;
+        if (text) li.querySelector('span').textContent = text;
+      };
+      setLine('lockEat', a.eat);
+      setLine('lockMove', a.move);
+      setLine('lockStop', a.stop);
+    }
+
+    /* ---------- 开屏/刷新：一切以 /api/state 为准（③-3/③-6）
+       opts.keepScreen：拨时钟专用——只更新时间与随时间变的数值，不把人从当前屏弹走。
+       跨天、劝退、当前屏与新状态矛盾这三种"真的发生了事"仍然切视图。 ---------- */
+    async function refreshState(opts) {
       const res = await fetch('/api/state', { headers: AUTH });
       if (res.status === 401) { localStorage.removeItem('token'); location.href = 'auth.html'; return; }
       const state = await res.json();
+      const prevVday = lastState && lastState.vday;
+      const crossDay = !!prevVday && state.vday !== prevVday;
+      const stay = !!(opts && opts.keepScreen) && !crossDay;
       lastState = state;
       if (state.view === 'onboarding') { location.href = 'onboarding.html'; return; }
       paintClocks(state);
       applySober(state);   // V3 P5：sober 映射（③-9）
       if (state.view === 'rejected') {
+        clearNight();
         document.getElementById('rejectedMsg').textContent = state.message || '';
-        show('rejected');
+        show('rejected');   // 安全永远赢过"停在当前屏"
         return;
       }
       renderYesterdayLine(state.yesterday_feedback);
-      if (state.view === 'advice') { renderAdvice(state.today_advice); show('advice'); }
-      else show('home');
+      renderRecall(state);
+      if (state.view === 'advice') renderAdvice(state.today_advice);
+      // 夜间闭环：锁定态还有效吗？安全升级到 danger/crisis 时强制退出锁定（安全永远赢过锁定）
+      const a = state.view === 'advice' ? state.today_advice : null;
+      const unsafe = !!(a && (a.safety_level === 'danger' || a.safety_level === 'crisis'));
+      if (unsafe) clearNight();
+      // 锁定态过期就地清掉，别把过期的 accepted_vday 留在 localStorage——
+      // 否则演示时把时钟拨回那一天，人会莫名其妙又掉进锁定屏/鼓励屏
+      else if (localStorage.getItem(ACCEPTED_KEY) && !acceptedValid(state)) clearNight();
+      let locked = acceptedValid(state) && !unsafe;
+      const lockAdvice = a || currentAdvice;      // 跨零点后后端已无当天建议，用手上这份继续显示
+      if (locked && !lockAdvice) { clearNight(); locked = false; }   // 连建议都拿不到就别硬撑锁定屏
+      if (locked) renderLock(lockAdvice);
+      else if (crossDay) currentAdvice = null;    // 换天且不在锁定态：旧建议作废
+      const nightScreen = locked ? (nightDone(state) ? 'done' : 'accepted') : null;
+      if (!stay) show(nightScreen || (state.view === 'advice' ? 'advice' : 'home'));
+      else if (nightScreen && activeScreen !== nightScreen) show(nightScreen);
+      else if (!nightScreen && (activeScreen === 'accepted' || activeScreen === 'done')) show('home');
+      else if (activeScreen === 'advice' && state.view !== 'advice') show('home');   // 建议没了，这屏不成立
+      else if (activeScreen === 'confirm') renderConfirm();   // 三行判断跟着新时间重算
       checkReminder(state);
+      if (activeScreen === 'accepted') checkSleep();   // 进锁定屏时立即检测一次（已过点就马上弹）
     }
 
-    /* ---------- 昨晚回执行 + 「点错了？改」（②-21） ---------- */
+    /* ---------- 昨晚回执（②-21）：Home 常驻行已按第 9 条移除，只剩结论屏顶部那句只读显示；
+       纠错入口按 Q4 搬到 设置 → 回看（列表行尾「改」） ---------- */
     let yesterdayFb = null;
     function renderYesterdayLine(yf) {
       yesterdayFb = yf;
-      const line = document.getElementById('yesterdayLine');
-      line.hidden = !yf;
-      if (yf) document.getElementById('yesterdayFb').textContent = yf.feedback;
-      // 结论屏顶部也带一行（回执可改入口在 Home，这里只显示）
       const ay = document.getElementById('adviceYesterday');
       ay.hidden = !yf;
       if (yf) ay.textContent = `昨晚记为「${yf.feedback}」`;
     }
-    document.getElementById('yesterdayEdit').addEventListener('click', () => {
-      if (!yesterdayFb) return;
-      openRecall(yesterdayFb.record_id, yesterdayFb.advice);
-    });
+
+    /* 回顾卡常驻（第 9 条）：有 pending_feedback 就一直摆在 Home 上，
+       答完整卡消失、不留"记下了"这类残留框 */
+    function renderRecall(state) {
+      const pf = state.pending_feedback;
+      const card = document.getElementById('recallCard');
+      if (!pf) { card.hidden = true; return; }
+      recallRecordId = pf.record_id;
+      const a = pf.advice || {};
+      document.getElementById('recallQuestion').textContent =
+        `昨晚那条「${a.move || a.stop || a.judgement || '建议'}」，做到了吗`;
+      card.hidden = false;
+    }
 
     /* ---------- 回顾卡（②-20）：四档+跳过，答完按上下文继续 ---------- */
     function openRecall(recordId, advice) {
@@ -592,7 +758,8 @@
       if (!profile || !profile.off_work_end || state.view !== 'home' || state.today_advice) { bar.hidden = true; return; }
       const now = new Date(state.virtual_now);
       const [h, m] = profile.off_work_end.split(':').map(Number);
-      const end = new Date(state.virtual_now); end.setHours(h, m, 0, 0);
+      // 第 7.1 条：首问时刻 = 下班点 +5 分钟（setHours 会把分钟溢出正常进位）
+      const end = new Date(state.virtual_now); end.setHours(h, m + 5, 0, 0);
       const rec = reminderStore(state.vday);
       if (rec.done || rec.asked >= 2 || now < end) { bar.hidden = true; return; }
       if (rec.nextAskAt && now < new Date(rec.nextAskAt)) { bar.hidden = true; return; }
@@ -678,13 +845,13 @@
         document.querySelectorAll(`[data-cal="${g}"]`).forEach(o => o.setAttribute('aria-pressed', 'false'));
         if (!wasOn) el.setAttribute('aria-pressed', 'true');   // 再点一次可取消（回到"暂未确认/不改"）
       }));
-    function openAdjust(presetBody) {
+    function openAdjust() {
       const h = (lastState && lastState.confirm_hint) || {};
       setCalWheel(h.remaining_min || 60);
       document.querySelectorAll('[data-cal="energy"]').forEach(o =>
         o.setAttribute('aria-pressed', String(o.getAttribute('data-val') === h.energy_guess)));
-      document.querySelectorAll('[data-cal="body"]').forEach(o =>
-        o.setAttribute('aria-pressed', String(!!presetBody && o.getAttribute('data-val') === presetBody)));
+      // 身体一栏不再预置：第 6 条之后「身体不舒服」走独立 sheet，这里只留用户手动选
+      document.querySelectorAll('[data-cal="body"]').forEach(o => o.setAttribute('aria-pressed', 'false'));
       openSheet('adjustSheet');
     }
     document.querySelectorAll('[data-adjust]').forEach(b => b.addEventListener('click', () => openAdjust()));
@@ -726,12 +893,32 @@
       document.body.toggleAttribute('data-sober', !!sober);
     }
 
+    /* ---------- 结论屏大字 + 关键词琥珀高亮（第 5 条）----------
+       focus 是可选字段：模型给的 judgement 原文片段。只有它确实是 judgement 的子串时才高亮，
+       否则整句平铺——天然兼容 L3 强制改写后 focus 失配的情况。
+       **严禁 innerHTML 直插模型文本**：这里用 DOM 拆分（createTextNode + <em>），
+       模型输出永远只作为文本节点存在，不可能变成标签。 */
+    function renderJudgement(a) {
+      const h1 = document.getElementById('advJudgement');
+      const text = a.judgement || '';
+      const focus = typeof a.focus === 'string' ? a.focus.trim() : '';
+      const at = focus ? text.indexOf(focus) : -1;
+      if (at < 0) { h1.textContent = text; return; }
+      const em = document.createElement('em');
+      em.textContent = focus;
+      h1.replaceChildren(
+        document.createTextNode(text.slice(0, at)),
+        em,
+        document.createTextNode(text.slice(at + focus.length)),
+      );
+    }
+
     /* ---------- 结论屏渲染：字段一个不落（③-4 + ②-1~6 基础位） ---------- */
     function renderAdvice(a) {
       if (!a) return;
       currentAdvice = a;
       loadTrace();
-      document.getElementById('advJudgement').textContent = a.judgement || '';
+      renderJudgement(a);
       // plan 三行：null 缺席（原型「维度可缺席」设计）
       const setPlan = (id, text) => {
         const li = document.getElementById(id);
@@ -760,16 +947,15 @@
       document.getElementById('btnHarder').hidden = !!unsafe;
       document.getElementById('btnSwitch').hidden = a.safety_level === 'crisis';
       // V3 P5：crisis 整卡（②-5）——只有关怀语（judgement）+ 停 + 就医行，
-      // 时间带/理由行/trace 全部退场（后端已把内容换成定稿求助文案，前端走同一渲染）
+      // 时间带/理由行/trace 全部退场（后端已把内容换成定稿求助文案，前端走同一渲染）。
+      // 合并折叠块之后，trace 也在 .srcs 里，隐藏这一块就同时收掉了两者
       const crisis = a.safety_level === 'crisis';
       document.querySelector('#s-advice .srcs').hidden = crisis;
-      document.querySelector('#s-advice .acc').hidden = crisis;
       if (crisis) document.getElementById('advBand').hidden = true;
       else renderBand();
-      // 理由行/trace 折叠回到默认收起
+      // 折叠回到默认收起
       document.querySelectorAll('#s-advice [data-acc]').forEach(b => b.setAttribute('aria-expanded', 'false'));
       document.getElementById('advWhy').hidden = true;
-      document.getElementById('tracePanel').hidden = true;
     }
 
     /* ---------- 时间带（③-13）：解析不出就整条隐藏 ---------- */
@@ -778,18 +964,25 @@
       const h = lastState && lastState.confirm_hint;
       if (!h || !h.sleep_point || !(h.remaining_min > 0)) { band.hidden = true; return; }
       const now = new Date(lastState.virtual_now);
-      const nowStr = hm(lastState.virtual_now);
       // 通勤段：还没到家（eta > now）才画（原型：不硬凑）
       const [eh, em] = h.home_eta.split(':').map(Number);
       const eta = new Date(lastState.virtual_now); eta.setHours(eh, em, 0, 0);
       if (eta < now) eta.setDate(eta.getDate() + 1);
-      let commuteMin = Math.round((eta - now) / 60000);
+      // 未到下班点时横条从下班点起画：否则「路上」会把在办公室干等的时间也算成通勤
+      // （下午 4 点看 demo1 会画成"路上 220 分"，实际只通勤 40 分）
+      let start = now, startStr = hm(lastState.virtual_now);
+      if (profile && profile.off_work_end) {
+        const [oh, om] = profile.off_work_end.split(':').map(Number);
+        const off = new Date(lastState.virtual_now); off.setHours(oh, om, 0, 0);
+        if (off > now && off < eta) { start = off; startStr = `${profile.off_work_end} 下班`; }
+      }
+      let commuteMin = Math.round((eta - start) / 60000);
       if (commuteMin < 0 || commuteMin > 12 * 60) commuteMin = 0;      // 解析异常不硬画
       const freeMin = h.remaining_min;
       const total = commuteMin + freeMin;
       if (!total) { band.hidden = true; return; }
       band.hidden = false;
-      document.getElementById('bandNow').textContent = nowStr;
+      document.getElementById('bandNow').textContent = startStr;
       document.getElementById('bandEnd').textContent = `${h.sleep_point} 睡点`;
       const spent = document.getElementById('segSpent');
       spent.hidden = !commuteMin;
@@ -801,14 +994,17 @@
       document.getElementById('labFree').style.flex = `${freeMin} 1 0`;
     }
 
-    /* ---------- trace（②-24） ---------- */
+    /* ---------- trace（②-24）：合并后作为「为什么是这条线」里的第三行「怎么想的」 ---------- */
     async function loadTrace() {
+      const row = document.getElementById('advTraceRow');
+      const ul = document.getElementById('tracePanel');
+      ul.replaceChildren();
+      row.hidden = true;
       const res = await fetch('/api/agent_trace', { headers: AUTH });
       if (!res.ok) return;
       const data = await res.json();
-      const ul = document.getElementById('tracePanel');
-      ul.innerHTML = '';
-      if (!data.trace) return;
+      if (!data.trace) return;   // 没轨迹就整行不出，别留一个空的「怎么想的」
+      row.hidden = false;
       for (const s of data.trace.steps) {
         const li = document.createElement('li');
         li.textContent = s;
@@ -819,13 +1015,46 @@
       ul.appendChild(meta);
     }
 
-    /* ---------- 接受 → 印章屏（①-8，不写本地历史） ---------- */
+    /* ---------- 接受 → 锁定屏（第 7.2 条 + Q2）：进去就出不来，只留树洞/食记 ---------- */
     document.getElementById('acceptBtn').addEventListener('click', () => {
-      const a = currentAdvice || {};
-      document.getElementById('stampLine').textContent = a.stop || a.judgement || '今晚从简';
+      localStorage.removeItem(DONE_KEY);   // 重新接受 = 这一晚重新开始，别直接掉进鼓励屏
+      if (lastState) localStorage.setItem(ACCEPTED_KEY, lastState.vday);
+      renderLock(currentAdvice || {});
       show('accepted');
+      checkSleep();   // 接受时已经过了睡点 → 立刻弹
     });
-    document.getElementById('acceptedBack').addEventListener('click', () => show('advice'));
+
+    /* ---------- 睡点弹窗 → 鼓励屏（第 7.2 条） ---------- */
+    // 睡点：先从 advice.stop 原文里抽 HH:MM，抽不到回落 confirm_hint.sleep_point
+    function sleepPoint() {
+      const m = String((currentAdvice || {}).stop || '').match(/([01]?\d|2[0-3]):[0-5]\d/);
+      if (m) return m[0];
+      const h = lastState && lastState.confirm_hint;
+      return (h && h.sleep_point) || null;
+    }
+    function sleepDue() {
+      const sp = sleepPoint();
+      if (!sp || !lastState) return false;
+      const [h, m] = sp.split(':').map(Number);
+      const t = new Date(lastState.virtual_now);
+      t.setHours(h, m, 0, 0);
+      if (h < 4) t.setDate(t.getDate() + 1);   // 睡点落在零点后：算次日
+      return new Date(lastState.virtual_now) >= t;
+    }
+    function showSleepModal(on) {
+      document.getElementById('sleepScrim').hidden = !on;
+      document.getElementById('sleepWrap').hidden = !on;
+    }
+    function checkSleep() {
+      if (activeScreen !== 'accepted') return;
+      if (!document.getElementById('sleepWrap').hidden) return;   // 已经开着就别重复弹
+      if (sleepDue()) showSleepModal(true);
+    }
+    document.getElementById('sleepOk').addEventListener('click', () => {
+      showSleepModal(false);
+      if (lastState) localStorage.setItem(DONE_KEY, localStorage.getItem(ACCEPTED_KEY) || lastState.vday);
+      show('done');
+    });
 
     /* ---------- 抽屉动作：纠正/难度/换做法（类型字符串逐字对齐后端） ---------- */
     document.querySelectorAll('[data-correct]').forEach(btn =>
@@ -874,31 +1103,50 @@
       closeSheets();
       sendFree(el.value, el);
     });
-    document.getElementById('freeSendHome').addEventListener('click', () => {
-      const el = document.getElementById('freeTextHome');
+    /* ---------- 树洞 / 食记：Home 与锁定屏各有一份同构 DOM（Q2），
+       所以下面全部用事件委托 + 就近 [data-tools] 取元素，不依赖全局 id ---------- */
+    const toolsOf = el => el.closest('[data-tools]');
+    const pick = (scope, sel) => scope ? scope.querySelector(sel) : null;
+
+    document.addEventListener('click', e => {
+      const t = e.target.closest && e.target.closest(
+        '[data-free-send],[data-photo-pick],[data-photo-delete],[data-panel]');
+      if (!t) return;
+      const scope = toolsOf(t);
+      // 面板开合（共享展开位：开一个关另一个；拍照回执不受影响）
+      if (t.hasAttribute('data-panel')) {
+        const name = t.getAttribute('data-panel');
+        const panel = pick(scope, `[data-panel-name="${name}"]`);
+        const isOpen = !panel.hidden;
+        scope.querySelectorAll('.homepanel').forEach(p => {
+          if (p.getAttribute('data-panel-name') !== 'receipt') p.hidden = true;
+        });
+        scope.querySelectorAll('[data-panel]').forEach(c => c.setAttribute('aria-expanded', 'false'));
+        if (!isOpen) { panel.hidden = false; t.setAttribute('aria-expanded', 'true'); }
+        return;
+      }
+      if (t.hasAttribute('data-free-send')) {
+        const el = pick(scope, '[data-free-text]');
+        sendFree(el.value, el);
+        return;
+      }
+      if (t.hasAttribute('data-photo-pick')) { pick(scope, '[data-photo-input]').click(); return; }
+      if (t.hasAttribute('data-photo-delete')) { deleteMeal(scope); return; }
+    });
+    document.addEventListener('keydown', e => {
+      const el = e.target.closest && e.target.closest('[data-free-text]');
+      if (!el || e.key !== 'Enter' || e.shiftKey) return;
+      e.preventDefault();
       sendFree(el.value, el);
     });
-    document.getElementById('freeTextHome').addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('freeSendHome').click(); }
-    });
 
-    /* ---------- 树洞/食记面板开合（共享展开位：开一个关另一个） ---------- */
-    document.querySelectorAll('[data-panel]').forEach(cell =>
-      cell.addEventListener('click', () => {
-        const id = cell.getAttribute('data-panel');
-        const panel = document.getElementById(id);
-        const isOpen = !panel.hidden;
-        document.querySelectorAll('.homepanel').forEach(p => { if (p.id !== 'photoReceipt') p.hidden = true; });
-        document.querySelectorAll('[data-panel]').forEach(c => c.setAttribute('aria-expanded', 'false'));
-        if (!isOpen) { panel.hidden = false; cell.setAttribute('aria-expanded', 'true'); }
-      }));
-
-    /* ---------- 食记：单张上传（③-15）+ 确认句 + 记错了？删除 ---------- */
+    /* ---------- 食记：单张上传（③-15）+ 确认句 + 记错了？删除。
+       锁定屏上传只做识别记录，不触发重算（现行为，Q2 明确保持） ---------- */
     let lastMealId = null;
-    document.getElementById('photoPick').addEventListener('click', () => document.getElementById('photoInput').click());
-    document.getElementById('photoInput').addEventListener('change', async () => {
-      const input = document.getElementById('photoInput');
-      if (!input.files.length) return;
+    document.addEventListener('change', async e => {
+      const input = e.target.closest && e.target.closest('[data-photo-input]');
+      if (!input || !input.files.length) return;
+      const scope = toolsOf(input);
       const form = new FormData();
       form.append('file', input.files[0]);
       toast('认一下这是什么…', true);
@@ -912,35 +1160,48 @@
       hideToast();
       if (!res.ok || !data.ok) { toast(data.error || '没认出来，晚点再试'); return; }
       lastMealId = data.meal_id;
-      document.getElementById('photoMsg').textContent = data.message;
-      document.getElementById('photoReceipt').hidden = false;
+      pick(scope, '[data-photo-msg]').textContent = data.message;
+      pick(scope, '[data-panel-name="receipt"]').hidden = false;
     });
-    document.getElementById('photoDelete').addEventListener('click', async () => {
+    async function deleteMeal(scope) {
       if (!lastMealId) return;
       const d = await api('/api/meal/delete', { meal_id: lastMealId });
-      document.getElementById('photoReceipt').hidden = true;
+      pick(scope, '[data-panel-name="receipt"]').hidden = true;
       if (d && d.ok) toast(d.message);
       else toast((d && d.error) || '删除失败');
-    });
+    }
 
-    /* ---------- 安全出口（P5 收口）：有建议 → correct 不太舒服；没建议 → 校准预置有明显不适 ---------- */
+    /* ---------- 安全出口（第 6 条）：两处入口（Home / s-confirm）统一弹「哪里不舒服」sheet。
+       链路：/api/free_input 存句子 → 已有建议时它自己就会重算；还没建议则接着 /api/offwork 生成。
+       句子既进【今天已知】也进 safety.assess，danger/crisis 由后端判定 → applySober 自动转灰卡/危机整卡。
+       前端不做任何词表判断，也不预设严重程度。 ---------- */
     document.querySelectorAll('[data-safety-exit]').forEach(b =>
-      b.addEventListener('click', async () => {
-        if (currentAdvice) {
-          setLoading(true);
-          const data = await api('/api/correct', { type: '不太舒服' });
-          setLoading(false);
-          if (data && data.rejected) { await refreshState(); return; }
-          if (data && data.advice) {
-            currentAdvice = data.advice;
-            await refreshState();
-            toast('好，先按舒服的来，建议已经收着了');
-          }
-        } else {
-          if (!lastState || !lastState.confirm_hint) { await startNight(); }
-          openAdjust('有明显不适');
-        }
+      b.addEventListener('click', () => {
+        document.getElementById('bodyText').value = '';
+        openSheet('bodySheet');
       }));
+    document.getElementById('bodySubmit').addEventListener('click', async () => {
+      const el = document.getElementById('bodyText');
+      // 空着提交＝只表达按钮本身的意思，仍然交给后端判断，不在前端加工
+      const text = el.value.trim() || '身体不太舒服';
+      closeSheets();
+      setLoading(true);
+      const data = await api('/api/free_input', { text });
+      setLoading(false);
+      if (!data) return;
+      if (data.error) { toast(data.error); return; }
+      if (data.rejected) { await refreshState(); return; }
+      el.value = '';
+      if (data.advice) {
+        // 当天已有建议：free_input 已经带着这句话重算完（danger 会在 refreshState 里转 sober）
+        currentAdvice = data.advice;
+        await refreshState();
+        toast(data.advice.severe_notice || '记下了，今晚按这个重新安排了');
+        return;
+      }
+      // 当天还没建议：接着生成。state 沿用既有的「不太舒服」下班状态（回执待收由 doOffwork 兜住）
+      await doOffwork({ state: '不太舒服' });
+    });
 
     /* ---------- 时钟条 + 30s 轮询（②-25 / ③-3） ---------- */
     document.querySelectorAll('[data-clock]').forEach(btn =>
@@ -950,18 +1211,33 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(JSON.parse(btn.getAttribute('data-clock'))),
         });
-        currentAdvice = null;   // 换天后旧建议作废，交给 refreshState 重判视图
-        await refreshState();
+        // 拨钟是为了跨过某个节点（下班点/睡点/新一天），不是为了刷新页面：
+        // 没跨过任何东西就停在当前屏，只更新时间与随时间变的数值
+        await refreshState({ keepScreen: true });
       }));
     setInterval(async () => {
       // 别打断正在进行的选择/抽屉
-      if (!document.getElementById('noteSheet').hidden || !document.getElementById('adjustSheet').hidden) return;
+      if (document.querySelectorAll('.calibration-sheet:not([hidden])').length) return;
       if (activeScreen === 'confirm') return;
       const res = await fetch('/api/state', { headers: AUTH });
       if (!res.ok) return;
       lastState = await res.json();
       document.getElementById('clockDisplay').textContent = lastState.virtual_now_display;
       if (activeScreen === 'home') { paintClocks(lastState); checkReminder(lastState); }
+      // 轮询「不主动切视图」的防打断原则（已知问题 #9）只开两个例外，且都限在锁定屏/鼓励屏上：
+      const onNight = activeScreen === 'accepted' || activeScreen === 'done';
+      if (!onNight) return;
+      paintClocks(lastState);
+      // 例外二：新一天到点（vday 已变且时针 ≥ 4，Q5）→ 全量刷新回初始页
+      if (!acceptedValid(lastState)) {
+        clearNight();
+        currentAdvice = null;
+        showSleepModal(false);
+        await refreshState();
+        return;
+      }
+      // 例外一：到睡点 → 弹一次睡觉弹窗
+      checkSleep();
     }, 30000);
 
     /* ---------- 设置中心（P6） ---------- */
@@ -1009,7 +1285,23 @@
         }
         const val = document.createElement('span');
         val.className = 'val'; val.textContent = it.vday.slice(5).replace('-', '/');
-        row.append(lab, val); li.appendChild(row);
+        row.append(lab, val);
+        // Q4：回执纠错入口搬到这里（Home 常驻行已移除）。只有"当天还能改的那条"——
+        // 即 /api/state 的 yesterday_feedback 指向的记录——才出「改」
+        const yf = lastState && lastState.yesterday_feedback;
+        if (yf && yf.vday === it.vday) {
+          const edit = document.createElement('button');
+          edit.className = 'textlink';
+          edit.type = 'button';
+          edit.textContent = '改';
+          edit.style.cssText = 'min-height:32px;padding:4px 8px;flex:0 0 auto';
+          edit.addEventListener('click', e => {
+            e.stopPropagation();
+            openRecall(yf.record_id, yf.advice);   // 打开回顾卡并回到 Home
+          });
+          row.appendChild(edit);
+        }
+        li.appendChild(row);
         return li;
       }));
       list.hidden = false;

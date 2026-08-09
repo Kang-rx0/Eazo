@@ -38,6 +38,7 @@ SYSTEM_PROMPT = """你是一个「最低自我照顾」助手，服务对象是�
 最终输出 JSON 格式：
 {
   "judgement": "今晚判断，一句话",
+  "focus": "judgement 里最关键的 2~6 个字，必须是 judgement 的原文片段；挑不出就用 null",
   "reason": "理由，必须回显用户的具体条件",
   "eat": "吃什么的建议，没有就用 null",
   "move": "动多久的建议，没有就用 null",
@@ -100,10 +101,11 @@ FALLBACK_ADVICE = {
 def _fmt_profile(p) -> str:
     """把 profiles 行格式化成短句（文档 5.3）。"""
     parts = [
-        f"下班时间 {p['off_work_start']}–{p['off_work_end']}，{p['overtime_freq']}",
+        # off_work_start/end = onboarding「一般几点上下班」的上班点与下班点（不是"下班时间范围"）
+        f"上班 {p['off_work_start']}，下班 {p['off_work_end']}，{p['overtime_freq']}",
         f"通勤单程约 {p['commute_min']} 分钟",
         f"上班时{p['work_body_state']}",
-        f"晚上{p['cooking']}",
+        f"平时吃饭：{p['cooking']}",
         f"运动基础：{p['exercise_base']}",
     ]
     if p["wake_time"]:

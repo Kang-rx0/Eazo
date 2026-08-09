@@ -18,12 +18,14 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS profiles (
     user_id           INTEGER PRIMARY KEY,
-    off_work_start    TEXT,    -- 下班时间范围起
-    off_work_end      TEXT,    -- 下班时间范围止
+    off_work_start    TEXT,    -- 上班时间（onboarding ob-1「一般几点上下班」的左轮，列名沿用历史）
+    off_work_end      TEXT,    -- 下班时间（右轮；到家时间、剩余时间、下班提醒都以它为准）
     overtime_freq     TEXT,    -- 加班频率
     commute_min       INTEGER, -- 通勤分钟
     work_body_state   TEXT,    -- 久坐 / 站着走动 / 体力消耗
-    cooking           TEXT,    -- 只能外卖 / 能简单做 / 能正经做
+    cooking           TEXT,    -- 平时吃饭怎么解决，存自然语言直接注入提示词：
+                               -- 大多点外卖 / 主要吃食堂 / 基本自己做 / 几样混着来
+                               -- （旧值 只能外卖 / 能简单做 / 能正经做 不迁移，前端预填时映射）
     diet_restrictions TEXT,    -- 饮食禁忌，逗号分隔，可空
     health_note       TEXT,    -- 健康问题一行，可空
     wake_time         TEXT,    -- 平时起床时间，"几点停"倒推睡眠时长用

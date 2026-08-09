@@ -46,12 +46,14 @@ def main() -> None:
             (USERNAME, pw_hash, clock.now().isoformat()),
         ).lastrowid
 
-        # 档案：典型久坐上班族
+        # 档案：典型久坐上班族。off_work_start 是「上班时间」（onboarding ob-1 左轮），
+        # 取值必须落在界面档位表里（上班轮 06:00–14:00 半点一档、通勤 15/30/45/60），
+        # 否则用户一进「修改资料」就会被吸附成别的值。
         conn.execute(
             "INSERT INTO profiles (user_id, off_work_start, off_work_end, overtime_freq, "
             "commute_min, work_body_state, cooking, diet_restrictions, health_note, "
             "wake_time, exercise_base, gender, age, height_cm, weight_kg) "
-            "VALUES (?, '18:00', '19:00', '偶尔加班', 40, '久坐', '只能外卖', NULL, NULL, "
+            "VALUES (?, '09:00', '19:00', '偶尔加班', 45, '久坐', '大多点外卖', NULL, NULL, "
             "'07:00', '无/偶尔', '女', 28, 162, 54)",
             (uid,),
         )
@@ -148,7 +150,7 @@ def seed_chronic_personas() -> None:
                 "commute_min, work_body_state, cooking, diet_restrictions, health_note, "
                 "wake_time, exercise_base, gender, age, height_cm, weight_kg, "
                 "chronic_condition, doctor_advice, severe_flag) "
-                "VALUES (?, '18:00', '19:00', '偶尔加班', 30, '久坐', '只能外卖', NULL, NULL, "
+                "VALUES (?, '09:00', '19:00', '偶尔加班', 30, '久坐', '大多点外卖', NULL, NULL, "
                 "'07:00', '无/偶尔', '女', 45, 160, 62, ?, ?, 0)",
                 (uid, extra["chronic_condition"], extra["doctor_advice"]),
             )

@@ -684,6 +684,57 @@ class TestOffworkCalibrationB2(unittest.TestCase):
         self.assertEqual(set(store["校准"].keys()), {"time_budget_min", "energy", "body"})
 
 
+class TestFocusHighlight(unittest.TestCase):
+    """V3 反馈修改第 5 条：focus 是 judgement 的高亮片段，enforce 出口保证它与 judgement 一致。
+    只要 L3 改写动过 judgement，旧 focus 必须作废——前端才不会拿一个对不上原文的片段去拆 DOM。"""
+
+    def _advice(self, **kw):
+        base = {"judgement": "今晚从简，做最小的一件事", "focus": "从简",
+                "reason": "通勤30分钟", "eat": "清淡晚餐", "move": "饭后走8分钟",
+                "stop": "23:00 放下手机", "sources": ["手册A"], "safety_flag": False}
+        base.update(kw)
+        return base
+
+    def test_是子串则原样保留(self):
+        out, _ = enforce(self._advice(), {"final_level": "none"}, ["search_reference"])
+        self.assertEqual(out["focus"], "从简")
+
+    def test_不是子串则置空(self):
+        out, _ = enforce(self._advice(focus="根本没出现过"), {"final_level": "none"},
+                         ["search_reference"])
+        self.assertIsNone(out["focus"])
+
+    def test_crisis整卡替换后focus作废(self):
+        # judgement 被换成定稿关怀语，旧 focus 不再是它的子串 → 必须清掉
+        out, _ = enforce(self._advice(), {"final_level": "crisis"}, [])
+        self.assertIsNone(out["focus"])
+        self.assertNotIn("从简", out["judgement"])
+
+    def test_danger改写judgement后focus作废(self):
+        # judgement 含正向活动安排 → 被替换成休息表述，旧 focus 随之作废
+        out, _ = enforce(self._advice(judgement="今晚可以去楼下走走", focus="走走"),
+                         {"final_level": "danger"}, [])
+        self.assertIsNone(out["focus"])
+
+    def test_danger未改写judgement则focus保留(self):
+        # 反向用例：danger 撤了吃和动，但 judgement 本身没被动过 → focus 仍然有效
+        out, _ = enforce(self._advice(judgement="今晚需要先歇着", focus="先歇着"),
+                         {"final_level": "danger"}, [])
+        self.assertEqual(out["focus"], "先歇着")
+
+    def test_非字符串或空白一律置空(self):
+        for bad in (123, "", "   ", []):
+            out, _ = enforce(self._advice(focus=bad), {"final_level": "none"},
+                             ["search_reference"])
+            self.assertIsNone(out["focus"], f"focus={bad!r} 应被置空")
+
+    def test_缺字段不报错也不新增(self):
+        a = self._advice()
+        a.pop("focus")
+        out, _ = enforce(a, {"final_level": "none"}, ["search_reference"])
+        self.assertIsNone(out.get("focus"))
+
+
 class TestSwitchPlanB3(unittest.TestCase):
     """V3 B3：/api/correct「换一种做法」——类型合法性、注入行拼接（纯函数）、词表零命中。"""
 

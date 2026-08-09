@@ -83,6 +83,20 @@
           <button class="opt" type="button" data-one="work_body_state" data-val="站着走动">站着走动，腿最累</button>
           <button class="opt" type="button" data-one="work_body_state" data-val="体力消耗">出体力，整个人被榨干</button>
         </div>
+        <!-- data-todayonly：问的是今天，不是长期底子（对齐 v0.2 语义）。
+             不进 profile，编辑态整组隐藏；提交后单独走 /api/free_input 进当晚【今天已知】 -->
+        <div class="editgroup" data-todayonly>
+          <p>今天有没有额外动一动</p>
+          <div class="chips" role="group" aria-label="今天是否额外运动">
+            <button class="chip" type="button" data-one="exercise_today" data-val="没有，就这样" aria-pressed="true">没有，就这样</button>
+            <button class="chip" type="button" data-one="exercise_today" data-val="运动了一下">运动了一下</button>
+          </div>
+        </div>
+        <div class="editgroup" data-todayonly>
+          <p>今天还有什么特别的</p>
+          <input class="field" id="todayNote" type="text" autocomplete="off"
+                 placeholder="可不填。比如：中午吃了火锅 / 下午淋了雨" aria-label="今天还有什么特别的">
+        </div>
       </div>
       <div class="foot">
         <button class="btn primary" type="button" data-next>下一步</button>
@@ -90,17 +104,20 @@
       </div>
     </section>
 
-    <!-- 3 平时三餐怎么解决：队友四选收回后端三选（③-14，「食堂」并入只能外卖） -->
+    <!-- 3 平时三餐怎么解决：四选，data-val 即注入提示词的自然语言（第 4 条改回四选） -->
     <section class="screen" id="s-ob-3">
       <div class="body">
         <p class="clock" data-step-caption></p>
         <p class="tag">先认识一下</p>
         <h1>平时吃饭<br>主要靠什么</h1>
         <p class="sub">问的是你平时的习惯。今晚具体怎么吃，到时候再说。</p>
+        <!-- 四选（第 4 条）：data-val 直接存自然语言，注入提示词就是这句话本身，
+             不再经过"只能外卖/能简单做/能正经做"这层需要翻译的枚举 -->
         <div class="opts" role="group" aria-label="平时三餐怎么解决">
-          <button class="opt" type="button" data-one="cooking" data-val="只能外卖" aria-pressed="true">大多点外卖，或吃食堂</button>
-          <button class="opt" type="button" data-one="cooking" data-val="能简单做">几样混着来，能简单做点</button>
-          <button class="opt" type="button" data-one="cooking" data-val="能正经做">基本自己做</button>
+          <button class="opt" type="button" data-one="cooking" data-val="大多点外卖" aria-pressed="true">大多点外卖</button>
+          <button class="opt" type="button" data-one="cooking" data-val="主要吃食堂">主要吃食堂</button>
+          <button class="opt" type="button" data-one="cooking" data-val="基本自己做">基本自己做</button>
+          <button class="opt" type="button" data-one="cooking" data-val="几样混着来">几样混着来</button>
         </div>
       </div>
       <div class="foot">
@@ -128,8 +145,12 @@
           <input class="field" id="dietInput" type="text" autocomplete="off"
                  placeholder="其他忌口就补一句，比如不吃香菜" aria-label="饮食禁忌补充" style="margin-top:9px">
         </div>
+        <!-- 病况栏（原「有确诊的疾病吗」）：用户反馈原来的「身体上还有别的要注意的吗」
+             与这栏观感重复，已删掉那栏，把"没确诊但要注意的"一并引导到这里写。
+             注意：这栏是自由填写、判断全在后端词表，非空且不含严重疾病词的内容会被
+             兜底当病名按慢性病保守管理（档位封顶/散步级/尾注）——这是既有规则，不是本次新增。 -->
         <div class="editgroup">
-          <p>有确诊的疾病吗？常见的先点，也可以在下面自己写</p>
+          <p>身体上有什么要我知道的？常见的先点，也可以在下面自己写</p>
           <!-- ③-5：chips 真实可选，只负责往病况里添字；判断全在后端 -->
           <div class="chips" role="group" aria-label="常见病况">
             <button class="chip" type="button" data-many="cc" data-val="高血压">高血压</button>
@@ -137,18 +158,14 @@
             <button class="chip" type="button" data-many="cc" data-val="心脏病">心脏病</button>
           </div>
           <input class="field" id="ccInput" type="text" autocomplete="off"
-                 placeholder="自己的话写就行，比如：高血压五六年了" aria-label="病况自述" style="margin-top:9px">
+                 placeholder="确诊的病、或者要绕开的地方都行，比如：高血压五六年了 / 腰不好"
+                 aria-label="病况自述" style="margin-top:9px">
         </div>
         <!-- ②-9：病况非空才展开医嘱框（医嘱强参考路径的入口） -->
         <div class="editgroup" id="docAdviceWrap" hidden>
           <p>医生对你的饮食/运动有过嘱咐吗？填了我会严格照着来</p>
           <textarea class="field" id="docAdvice" rows="3"
                     placeholder="比如：晚餐主食减半，不做剧烈运动，饭后可散步" aria-label="医嘱"></textarea>
-        </div>
-        <div class="editgroup">
-          <p>身体上还有别的要注意的吗</p>
-          <input class="field" id="healthNote" type="text" autocomplete="off"
-                 placeholder="比如：腰不好 / 胃不太好" aria-label="健康备注">
         </div>
         <p class="voice">说一次，我记着，不会再问第二遍。</p>
       </div>
@@ -292,19 +309,20 @@
     /* ---------- chips / opts 通用选择 ----------
        data-one：组内单选；带 data-clearable 的可再点取消（性别可不选）。
        data-many：多选开关。所有状态都留在 DOM 的 aria-pressed 上，提交时现收。 */
-    document.querySelectorAll('[data-one]').forEach(el => {
-      el.addEventListener('click', () => {
+    // 事件委托而非逐个绑定：预填时可能补进"库里有、档位表里没有"的 chip（见 setOneOrAdd），
+    // 这些后插进来的元素也要能点。
+    document.addEventListener('click', e => {
+      const el = e.target.closest && e.target.closest('[data-one], [data-many]');
+      if (!el) return;
+      if (el.hasAttribute('data-one')) {
         const group = el.getAttribute('data-one');
         const wasOn = el.getAttribute('aria-pressed') === 'true';
         document.querySelectorAll(`[data-one="${group}"]`).forEach(o => o.setAttribute('aria-pressed', 'false'));
         el.setAttribute('aria-pressed', String(!(wasOn && el.hasAttribute('data-clearable'))));
-      });
-    });
-    document.querySelectorAll('[data-many]').forEach(el => {
-      el.addEventListener('click', () => {
+      } else {
         el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true'));
         if (el.getAttribute('data-many') === 'cc') ccChanged();
-      });
+      }
     });
     function oneVal(group) {
       const el = document.querySelector(`[data-one="${group}"][aria-pressed="true"]`);
@@ -317,6 +335,24 @@
     function setOne(group, val) {
       document.querySelectorAll(`[data-one="${group}"]`).forEach(o =>
         o.setAttribute('aria-pressed', String(o.getAttribute('data-val') === String(val))));
+    }
+    /* 预填专用：库里的值没有对应 chip（老账号、或档位表改过）时补一个再选中。
+       原来的做法是"吸附到最近档位"——用户看不出自己的数据被改了，保存后就是永久的。 */
+    function setOneOrAdd(group, val, label) {
+      const v = String(val);
+      if (!document.querySelector(`[data-one="${group}"][data-val="${v}"]`)) {
+        const sibling = document.querySelector(`[data-one="${group}"]`);
+        if (!sibling) return;
+        const chip = document.createElement('button');
+        chip.className = sibling.className || 'chip';   // 跟同组现有选项一个样式（chip / opt）
+        chip.type = 'button';
+        chip.setAttribute('data-one', group);
+        chip.setAttribute('data-val', v);
+        chip.setAttribute('data-extra', '');
+        chip.textContent = label || v;
+        sibling.parentNode.appendChild(chip);
+      }
+      setOne(group, v);
     }
 
     /* ---------- 病况区：chips 或输入框非空 → 展开医嘱框（②-9）。前端不做任何医学判断 ---------- */
@@ -363,19 +399,41 @@
       document.getElementById(WHEELS[key].id).querySelectorAll('span').forEach((s, i) =>
         i === idx ? s.setAttribute('data-on', '') : s.removeAttribute('data-on'));
     }
+    /* 库里的值不在档位表里（老账号、或档位表改过）时，把它按时间顺序插进滚轮再选中。
+       绝不能吸附到默认值——那等于用户一进编辑态就被悄悄改了作息，保存后永久生效。 */
+    function insertWheelOption(key, val) {
+      const w = WHEELS[key];
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(val || '')) return -1;   // 不是 HH:MM 就别插
+      const mins = v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; };
+      // off 轮跨零点（16:00…02:00）：小于起始点的按 +24h 排
+      const base = mins(w.list[0]);
+      const norm = v => { const t = mins(v); return t < base ? t + 24 * 60 : t; };
+      let idx = w.list.findIndex(v => norm(v) > norm(val));
+      if (idx < 0) idx = w.list.length;
+      w.list.splice(idx, 0, val);
+      const span = document.createElement('span');
+      span.textContent = val;
+      span.setAttribute('data-extra', '');    // 标记为"你原来填的值"，样式与其余档位一致
+      const track = document.getElementById(w.id);
+      track.insertBefore(span, track.children[idx] || null);
+      return idx;
+    }
     function setWheel(key, val) {
       const w = WHEELS[key];
       let idx = w.list.indexOf(val);
-      if (idx < 0) idx = w.list.indexOf(w.val);   // 不在档位表里（老账号旧值）就停在默认值
+      if (idx < 0) idx = insertWheelOption(key, val);            // 老值不在表里 → 插进去，别吸附
+      if (idx < 0) idx = w.list.indexOf(w.val);                  // 值本身非法（空/格式错）才回默认
       if (idx < 0) idx = 0;
       w.val = w.list[idx];
       document.getElementById(w.id).scrollTop = idx * WHEEL_ROW;
       markWheel(key, idx);
     }
-    function wheelMinutes(key) {                 // off 列表把跨零点编码成 24:00→1440
-      const w = WHEELS[key];
-      const base = key === 'on' ? 6 : 16;
-      return base * 60 + w.list.indexOf(w.val) * 30;
+    function wheelMinutes(key) {                 // off 轮跨零点：01:00 记成 25:00
+      // 直接解析当前值，不按"索引 × 30 分钟"算——插进来的非标准档位会让索引算法失真
+      const [h, m] = (WHEELS[key].val || '00:00').split(':').map(Number);
+      const t = h * 60 + m;
+      const base = (key === 'on' ? 6 : 16) * 60;
+      return t < base ? t + 24 * 60 : t;
     }
     function renderWorkLen() {
       const mins = wheelMinutes('off') - wheelMinutes('on');
@@ -386,6 +444,10 @@
     Object.keys(WHEELS).forEach(buildWheel);
 
     /* ---------- 组装 payload：键名与 db.PROFILE_FIELDS 一一对齐 ---------- */
+    // 吃饭旧枚举 → 四选新值（老账号预填用；库里不做迁移，读取端映射兜住）
+    const COOKING_LEGACY = { '只能外卖': '大多点外卖', '能简单做': '几样混着来', '能正经做': '基本自己做' };
+    // 老账号的 health_note：界面已无对应输入框，预填时接住、保存时原样写回（首次注册为 null）
+    let prefilledHealthNote = null;
     const num = id => { const v = document.getElementById(id).value.trim(); return v ? Number(v) : null; };
     function buildPayload() {
       // 病况合并（③-5）：chips 选中值 + 自由输入合并成一句；输入里已写过的病名不重复
@@ -401,9 +463,11 @@
         overtime_freq: oneVal('overtime_freq') || '偶尔加班',
         commute_min: Number(oneVal('commute_min') || 30),
         work_body_state: oneVal('work_body_state') || '久坐',
-        cooking: oneVal('cooking') || '只能外卖',
+        cooking: oneVal('cooking') || '大多点外卖',
         diet_restrictions: diet || null,
-        health_note: document.getElementById('healthNote').value.trim() || null,
+        // health_note 输入框已删（与病况栏观感重复，用户拍板合并）。字段本身保留：
+        // 老账号里存着的备注不动、继续注入提示词与安全检测，只是不再从界面收集新的。
+        health_note: prefilledHealthNote,
         wake_time: WHEELS.wake.val,
         exercise_base: oneVal('exercise_base') || '无/偶尔',
         gender: oneVal('gender'),
@@ -416,29 +480,31 @@
       };
     }
 
-    /* ---------- 编辑态预填：/api/profile 灌回全部控件 ---------- */
+    /* ---------- 编辑态预填：/api/profile 灌回全部控件
+       返回是否预填成功。失败必须让调用方知道：三个时间滚轮在没被 setWheel 灌值时会停在
+       列表第一项（06:00 / 16:00 / 05:00），这时候保存会把用户真实作息覆盖成垃圾值。 ---------- */
     async function prefill() {
       const res = await fetch('/api/profile', { headers: { 'Authorization': 'Bearer ' + token } });
-      if (!res.ok) return;
+      if (res.status === 401) { localStorage.removeItem('token'); location.href = 'auth.html'; return false; }
+      if (!res.ok) return false;
       const p = (await res.json()).profile;
-      if (!p) return;
+      if (!p) return false;
       setWheel('on', p.off_work_start);
       setWheel('off', p.off_work_end);
       setWheel('wake', p.wake_time);
       if (p.overtime_freq) setOne('overtime_freq', p.overtime_freq);
-      if (p.commute_min != null) {                       // 老档位（10/20/90…）收到最近的 chip
-        const chips = [15, 30, 45, 60];
-        const nearest = chips.reduce((a, b) => Math.abs(b - p.commute_min) < Math.abs(a - p.commute_min) ? b : a);
-        setOne('commute_min', nearest);
-      }
+      // 通勤：库里的值没有对应档位（老账号 10/20/40/90…）就补一个 chip，不吸附到最近档位
+      if (p.commute_min != null) setOneOrAdd('commute_min', p.commute_min, `${p.commute_min} 分钟`);
       if (p.work_body_state) setOne('work_body_state', p.work_body_state);
-      if (p.cooking) setOne('cooking', p.cooking);
+      // 吃饭四选（第 4 条）：老账号存的是旧枚举，映射到对应新选项；映射不到的（脚本写入的
+      // 自由值）走 setOneOrAdd 原样显示，不静默改成默认项
+      if (p.cooking) setOneOrAdd('cooking', COOKING_LEGACY[p.cooking] || p.cooking);
       if (p.exercise_base) setOne('exercise_base', p.exercise_base);
       if (p.gender) setOne('gender', p.gender);
       document.getElementById('ageInput').value = p.age ?? '';
       document.getElementById('heightInput').value = p.height_cm ?? '';
       document.getElementById('weightInput').value = p.weight_kg ?? '';
-      document.getElementById('healthNote').value = p.health_note || '';
+      prefilledHealthNote = p.health_note || null;   // 界面不再展示，但保存时原样带回，不清空老数据
       // 饮食禁忌：词在 chips 里的点亮，剩下的进补充输入框
       const dietVals = (p.diet_restrictions || '').split(',').filter(Boolean);
       const dietChipVals = [...document.querySelectorAll('[data-many="diet"]')].map(el => el.getAttribute('data-val'));
@@ -459,12 +525,35 @@
       document.getElementById('docAdvice').value = p.doctor_advice || '';
       ccChanged();
       renderWorkLen();
+      return true;
+    }
+
+    /* ---------- 「今天」那一组（第 3 条）：只在首次走完时发，编辑态整组隐藏也就不会发 ---------- */
+    function todayOnlySentence() {
+      const parts = [];
+      if (oneVal('exercise_today') === '运动了一下') parts.push('今天已经运动过一次');
+      const note = (document.getElementById('todayNote').value || '').trim();
+      if (note) parts.push(note);
+      return parts.join('；');   // 全默认 + 没填 → 空串 → 不发请求
+    }
+    async function sendTodayOnly() {
+      const text = todayOnlySentence();
+      if (!text) return;
+      try {
+        await fetch('/api/free_input', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ text }),
+        });
+      } catch (e) { /* 档案已存好，这一句发不出去不该拦住进主界面 */ }
     }
 
     /* ---------- 提交 ---------- */
     let submitting = false;
+    let prefillFailed = false;   // 编辑态预填失败：控件里不是你的资料，保存会覆盖真实档案
     async function submit(stay) {
       if (submitting) return;
+      if (prefillFailed) { toast('还没读到你的资料，先刷新一下再保存'); return; }
       submitting = true;
       try {
         const res = await fetch('/api/onboarding', {
@@ -472,6 +561,8 @@
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
           body: JSON.stringify(buildPayload()),
         });
+        // 登录过期要跳回登录页，不能报"保存失败"让人一直重试（app.html 的 api() 已有此处理）
+        if (res.status === 401) { localStorage.removeItem('token'); location.href = 'auth.html'; return; }
         if (!res.ok) { toast('保存失败，稍后再试一次'); return; }
         if (stay) {
           // 编辑态：明确反馈后回设置（修改资料不自动重出今晚建议）
@@ -479,7 +570,11 @@
           setTimeout(leaveEdit, 700);
           return;
         }
-        // 首次走完：交给 app.html 按 /api/state 的 view 展示（rejected → 劝退屏，③-6）
+        // 首次走完：把「今天」那一组（非默认答案）作为一句自由输入送进当晚的【今天已知】。
+        // 走的是现成的 /api/free_input 管道 —— 存库 + 生成时全量过三层安全检测，
+        // 不是前端假显示。失败不拦路：档案已经存好了，别把人堵在 onboarding。
+        await sendTodayOnly();
+        // 交给 app.html 按 /api/state 的 view 展示（rejected → 劝退屏，③-6）
         location.href = 'app.html';
       } catch (e) {
         toast('连不上服务，稍后再试一次');
@@ -505,7 +600,17 @@
         b.classList.remove('primary'); b.classList.add('ghost');
       });
       document.querySelectorAll('[data-save]').forEach(b => { b.hidden = false; b.style.order = '-1'; });
-      prefill().then(() => show(STEPS.includes(editSec) ? editSec : 'ob-1'));
+      // 「今天」那一组问的是今天、不进 profile，改基本情况时不该出现（v0.2 data-todayonly 语义）
+      document.querySelectorAll('[data-todayonly]').forEach(g => g.hidden = true);
+      prefill().then(ok => {
+        if (!ok) {
+          // 读不到档案就锁住保存：控件此刻显示的不是用户的资料，存下去会覆盖真实作息
+          prefillFailed = true;
+          document.querySelectorAll('[data-save]').forEach(b => b.disabled = true);
+          toast('没读到你的资料，先刷新一下再改');
+        }
+        show(STEPS.includes(editSec) ? editSec : 'ob-1');
+      });
     } else {
       setWheel('on', '09:00'); setWheel('off', '19:00'); setWheel('wake', '07:00');
       renderWorkLen();

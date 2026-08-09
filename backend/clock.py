@@ -9,6 +9,11 @@ logger = logging.getLogger(__name__)
 
 _WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
+# 演示起点：用户要求从下午 4 点开场（下班点之前，能完整走"等下班 → 下班 → 睡点"）。
+# 三处落点共用：初始时刻、advance_days 换天后的时刻、「重置」按钮。
+DEMO_START = datetime(2026, 8, 24, 16, 0)
+DEMO_HOUR, DEMO_MINUTE = DEMO_START.hour, DEMO_START.minute
+
 
 def now() -> datetime:
     """当前虚拟时间。"""
@@ -49,9 +54,9 @@ def advance_hours(hours: float) -> datetime:
 
 
 def advance_days(days: int) -> datetime:
-    """跳到 N 天后的 19:00（演示按钮「下一天」）。"""
+    """跳到 N 天后的演示时刻（16:00）。days 可为负数（回拨到前一天 16:00）。"""
     target = now() + timedelta(days=days)
-    return _write(target.replace(hour=19, minute=0, second=0))
+    return _write(target.replace(hour=DEMO_HOUR, minute=DEMO_MINUTE, second=0))
 
 
 def set_time(iso_str: str) -> datetime:
@@ -60,5 +65,6 @@ def set_time(iso_str: str) -> datetime:
 
 
 def reset() -> datetime:
-    """重置为真实当前时间（仅演示控制条用，不属于业务逻辑）。"""
-    return _write(datetime.now())
+    """重置回演示起点 DEMO_START（仅演示控制条用，不属于业务逻辑）。
+    旧行为是跳到真实系统时间——那会离开演示数据所在的日期、把种子态打乱，演示时没有用处。"""
+    return _write(DEMO_START)

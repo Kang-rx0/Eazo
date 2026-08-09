@@ -554,6 +554,16 @@ def enforce(advice: dict, safety_state: dict, tools_called: list[str]) -> tuple[
         rewrites.append(f"内部术语清除：{field} 删除 {dropped}")
         advice[field] = new_val or (REST_JUDGEMENT if field == "judgement" else None)
 
+    # ---- 5. focus 一致性（V3 反馈修改第 5 条）----
+    # focus 只是 judgement 的高亮片段。上面任何一条改写动过 judgement，旧 focus 就不再是
+    # 它的子串——直接丢掉，绝不让一个对不上原文的片段流到前端去（前端也有同样的校验，双保险）。
+    focus = advice.get("focus")
+    if focus is not None and (
+            not isinstance(focus, str)
+            or not focus.strip()
+            or focus not in (advice.get("judgement") or "")):
+        advice["focus"] = None
+
     if rewrites:
         logger.warning("安全L3改写 level=%s 改写=%s", level, rewrites)
     return advice, rewrites

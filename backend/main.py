@@ -689,9 +689,12 @@ async def api_meal_delete(payload: dict, request: Request):
 
 @app.post("/api/clock")
 async def api_clock(payload: dict):
-    """时间控制：{advance_hours: 2} / {advance_days: 1} / {set: "..."} / {reset: true}"""
+    """时间控制：{advance_minutes: 10} / {advance_hours: 2} / {advance_days: 1} / {set: "..."} / {reset: true}
+    三个 advance_* 均支持负数（回拨，演示道具用）。"""
     try:
-        if "advance_hours" in payload:
+        if "advance_minutes" in payload:
+            t = clock.advance_hours(float(payload["advance_minutes"]) / 60)
+        elif "advance_hours" in payload:
             t = clock.advance_hours(float(payload["advance_hours"]))
         elif "advance_days" in payload:
             t = clock.advance_days(int(payload["advance_days"]))
@@ -702,7 +705,7 @@ async def api_clock(payload: dict):
         else:
             return JSONResponse(
                 status_code=400,
-                content={"error": "参数需为 advance_hours / advance_days / set / reset 之一"},
+                content={"error": "参数需为 advance_minutes / advance_hours / advance_days / set / reset 之一"},
             )
     except (ValueError, TypeError) as e:
         return JSONResponse(status_code=400, content={"error": f"参数不合法：{e}"})
