@@ -317,6 +317,8 @@
       </div>
       <div class="foot">
         <button class="btn ghost" type="button" id="byeBack">回到首页</button>
+        <!-- 隐蔽的反悔入口：默认今晚收工，但真改主意了还有条不显眼的路 -->
+        <button class="textlink" type="button" id="byeRevert" style="display:block;margin:10px auto 0;opacity:.7">还是做吧</button>
       </div>
     </section>
 
@@ -654,6 +656,7 @@
        Q5：新一天回初始页的时间点是凌晨 04:00 —— 所以"跨过零点但还没到 4 点"时锁定继续有效，
        否则 23:50 接受、00:10 就被弹回首页，夜还没过完。 ---------- */
     const ACCEPTED_KEY = 'accepted_vday', DONE_KEY = 'night_done_vday';
+    const DECLINED_KEY = 'declined_vday';   // 今晚不做：当天终止态，抑制建议复活
     function isNextDay(prev, cur) {
       const a = new Date(prev + 'T00:00:00'), b = new Date(cur + 'T00:00:00');
       return Math.round((b - a) / 86400000) === 1;
@@ -664,9 +667,17 @@
       if (state.vday === v) return true;
       return new Date(state.virtual_now).getHours() < 4 && isNextDay(v, state.vday);
     }
+    // 今晚已放弃？（同 accepted 的当天/凌晨 4 点前有效逻辑）跨天自动失效。
+    function declinedValid(state) {
+      const v = localStorage.getItem(DECLINED_KEY);
+      if (!v || !state) return false;
+      if (state.vday === v) return true;
+      return new Date(state.virtual_now).getHours() < 4 && isNextDay(v, state.vday);
+    }
     function clearNight() {
       localStorage.removeItem(ACCEPTED_KEY);
       localStorage.removeItem(DONE_KEY);
+      localStorage.removeItem(DECLINED_KEY);
     }
     function nightDone(state) {
       return acceptedValid(state) && localStorage.getItem(DONE_KEY) === localStorage.getItem(ACCEPTED_KEY);
@@ -729,7 +740,14 @@
       if (locked) renderLock(lockAdvice);
       else if (crossDay) currentAdvice = null;    // 换天且不在锁定态：旧建议作废
       const nightScreen = locked ? (nightDone(state) ? 'done' : 'accepted') : null;
-      if (!stay) show(nightScreen || (state.view === 'advice' ? 'advice' : 'home'));
+      // 今晚已「不做」：即使后端 view=advice，也不复活建议屏，落到 home（问题3）。
+      // 但当前正停在 bye 屏则别打断（刚点完今天不做）。
+      const declined = declinedValid(state) && !locked;
+      const wantAdvice = state.view === 'advice' && !declined;
+      if (!stay) {
+        if (declined && activeScreen === 'bye') { /* 停在 bye，不跳 */ }
+        else show(nightScreen || (wantAdvice ? 'advice' : 'home'));
+      }
       else if (nightScreen && activeScreen !== nightScreen) show(nightScreen);
       else if (!nightScreen && (activeScreen === 'accepted' || activeScreen === 'done')) show('home');
       else if (activeScreen === 'advice' && state.view !== 'advice') show('home');   // 建议没了，这屏不成立
@@ -899,6 +917,8 @@
       return true;
     }
     async function startNight() {
+      // 今晚已「不做」：默认收工，不从 home 复活今晚流程（问题3）。反悔走 s-bye 上的隐蔽入口「还是做吧」。
+      if (declinedValid(lastState)) { toast('今晚先这样，明天见'); return; }
       // 只有后端确认今天已有建议时才直接回建议屏；否则跨天残留的昨晚 currentAdvice 会误跳
       if (currentAdvice && lastState && lastState.view === 'advice') { show('advice'); return; }
       // 先拉一次最新 state（confirm_hint 里的剩余分钟跟着虚拟时钟走）
@@ -1182,8 +1202,22 @@
       }));
 
     /* ---------- 今天不做 → s-bye（③-16 配套：不调接口、不记录） ---------- */
-    document.getElementById('noteBye').addEventListener('click', () => { closeSheets(); show('bye'); });
+    document.getElementById('noteBye').addEventListener('click', () => {
+      closeSheets();
+      // 今晚不做＝当天终止态：清掉建议与夜间锁定，写 declined，避免之后从 home「开始今晚」
+      // 又被旧建议复活（问题3）。跨天自动失效。
+      const vday = lastState && lastState.vday;
+      clearNight();
+      currentAdvice = null;
+      if (vday) localStorage.setItem(DECLINED_KEY, vday);
+      show('bye');
+    });
     document.getElementById('byeBack').addEventListener('click', () => show('home'));
+    // 还是做吧：清掉 declined，重新走今晚流程（反悔入口）
+    document.getElementById('byeRevert').addEventListener('click', () => {
+      localStorage.removeItem(DECLINED_KEY);
+      startNight();
+    });
 
     /* ---------- 补充一句（noteSheet）/ 树洞 → /api/free_input ---------- */
     // generateIfNone：当天还没建议时，是否接着生成今晚安排。
