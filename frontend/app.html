@@ -116,7 +116,10 @@
           <!-- 拍照回执独立一行：确认句 + 「记错了？删除」（③-15 单张） -->
           <div class="homepanel" hidden data-panel-name="receipt">
             <p class="note" data-photo-msg style="margin:8px 0 0;padding:0;border:0"></p>
-            <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
+            <div class="inline-row" style="gap:16px;margin-top:2px">
+              <button class="textlink" type="button" data-receipt-dismiss>知道了</button>
+              <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
+            </div>
           </div>
           <div class="homegrid">
             <button class="homecell" type="button" aria-expanded="false" data-panel="free">
@@ -269,7 +272,10 @@
           </div>
           <div class="homepanel" hidden data-panel-name="receipt">
             <p class="note" data-photo-msg style="margin:8px 0 0;padding:0;border:0"></p>
-            <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
+            <div class="inline-row" style="gap:16px;margin-top:2px">
+              <button class="textlink" type="button" data-receipt-dismiss>知道了</button>
+              <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
+            </div>
           </div>
           <div class="homegrid">
             <button class="homecell" type="button" aria-expanded="false" data-panel="free">
@@ -1164,7 +1170,7 @@
 
     document.addEventListener('click', e => {
       const t = e.target.closest && e.target.closest(
-        '[data-free-send],[data-photo-pick],[data-photo-delete],[data-panel]');
+        '[data-free-send],[data-photo-pick],[data-photo-delete],[data-receipt-dismiss],[data-panel]');
       if (!t) return;
       const scope = toolsOf(t);
       // 面板开合（共享展开位：开一个关另一个；拍照回执不受影响）
@@ -1186,6 +1192,12 @@
       }
       if (t.hasAttribute('data-photo-pick')) { pick(scope, '[data-photo-input]').click(); return; }
       if (t.hasAttribute('data-photo-delete')) { deleteMeal(scope); return; }
+      // 「知道了」：只收起回执气泡，不删记录（记录仍在 home 常驻列表里看得到）
+      if (t.hasAttribute('data-receipt-dismiss')) {
+        const r = pick(scope, '[data-panel-name="receipt"]');
+        if (r) r.hidden = true;
+        return;
+      }
     });
     document.addEventListener('keydown', e => {
       const el = e.target.closest && e.target.closest('[data-free-text]');
@@ -1424,6 +1436,7 @@
       if (res.ok) profile = (await res.json()).profile;
       await refreshState();
     })();
-  </script>
+  
+</script>
 </body>
 </html>
