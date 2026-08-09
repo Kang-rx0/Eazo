@@ -574,8 +574,10 @@
         // 走的是现成的 /api/free_input 管道 —— 存库 + 生成时全量过三层安全检测，
         // 不是前端假显示。失败不拦路：档案已经存好了，别把人堵在 onboarding。
         await sendTodayOnly();
-        // 交给 app.html 按 /api/state 的 view 展示（rejected → 劝退屏，③-6）
-        location.href = 'app.html';
+        // 交给 app.html 按 /api/state 的 view 展示（rejected → 劝退屏，③-6）。
+        // 带 firstnight=1：首次完成直接进「确认屏」看到价值，不停在空 home
+        //（app.html 会在 view 为 home/advice 时据此自动进 confirm；rejected/onboarding 不受影响）。
+        location.href = 'app.html?firstnight=1';
       } catch (e) {
         toast('连不上服务，稍后再试一次');
       } finally {

@@ -1438,6 +1438,13 @@
       const res = await fetch('/api/profile', { headers: AUTH });
       if (res.ok) profile = (await res.json()).profile;
       await refreshState();
+      // 首次完成 onboarding（?firstnight=1）：直接进「确认屏」看到今晚判断，不停在空 home。
+      // 仅当 refreshState 已落到 home/advice（非 rejected/锁定屏）时才接管——安全/异常路由优先。
+      const params = new URLSearchParams(location.search);
+      if (params.get('firstnight') === '1') {
+        history.replaceState(null, '', location.pathname);   // 清掉参数，避免刷新/后退再触发
+        if (activeScreen === 'home' || activeScreen === 'advice') await startNight();
+      }
     })();
   
 
