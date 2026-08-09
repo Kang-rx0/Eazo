@@ -811,6 +811,11 @@ async def api_state(request: Request):
         record = db.get_daily_record(user_id, clock.today())
         today_advice = json.loads(record["advice_json"]) if record and record["advice_json"] else None
         view = "advice" if today_advice else "home"
+        # 明确高危身体/心理信号（danger/crisis）：硬退出到简洁安全结束页，不进「恢复建议 + 灰色 Home」。
+        # 建议仍照常生成并存库（留痕/安全审计）、today_advice 照常带回（结束页文案从中取，前端不硬编）；
+        # 这里只改「呈现」——安全检测/分级/enforce 逻辑一律不动。
+        if today_advice and today_advice.get("safety_level") in ("danger", "crisis"):
+            view = "safety_exit"
         pending = db.get_pending_records_before(user_id, clock.today())
         if pending:
             latest = pending[-1]

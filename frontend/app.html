@@ -335,6 +335,22 @@
       </div>
     </section>
 
+    <!-- ========== 安全结束页：明确高危信号（danger/crisis）硬退出到这里，不进灰色建议屏。
+         文案全部来自后端安全模块（today_advice 的 judgement / see_doctor），前端不硬编安全内容。 ========== -->
+    <section class="screen" id="s-safety-exit">
+      <div class="body">
+        <p class="tag" id="safetyExitTag">先照顾好身体</p>
+        <h1 id="safetyExitTitle">今晚先<br>停下来</h1>
+        <p class="sub" id="safetyExitBody"></p>
+        <!-- 就医/求助文案用 .docline（sober 下仍可见），不能用 .voice——sober 会隐藏 .voice，
+             而这句是安全页最关键的内容，必须显示。 -->
+        <p class="docline" id="safetyExitDoctor"></p>
+      </div>
+      <div class="foot">
+        <button class="btn ghost" type="button" id="safetyExitHome">回到首页</button>
+      </div>
+    </section>
+
     <!-- ========== 设置中心（P6）：原型演示夹具入口不进来；推送时间/顺延次数/停下提示
          三项按 ③-11 隐藏（顺延已固定 30 分钟×2，不做假设置） ========== -->
     <section class="screen" id="s-settings">
@@ -726,6 +742,15 @@
         show('rejected');   // 安全永远赢过"停在当前屏"
         return;
       }
+      // 明确高危信号（danger/crisis）：硬退出到安全结束页，不进 sober 建议屏/灰色 Home。
+      // clearNight + 清 currentAdvice：强制退出任何锁定态、防止别处（startNight 等）复活旧建议。
+      if (state.view === 'safety_exit') {
+        clearNight();
+        currentAdvice = null;
+        renderSafetyExit(state.today_advice);
+        show('safety-exit');   // 安全永远赢过"停在当前屏"
+        return;
+      }
       renderYesterdayLine(state.yesterday_feedback);
       renderRecall(state);
       // 食记回执随「当天」生命周期：后端 today_meals 只含当天记录，跨天自动为空。
@@ -1023,9 +1048,22 @@
        caution → 不进 sober（正常配色半退场，avoid/就医行可见）；rejected → 劝退屏 sober ---------- */
     function applySober(state) {
       const a = state.view === 'advice' ? state.today_advice : null;
-      const sober = state.view === 'rejected' ||
+      const sober = state.view === 'rejected' || state.view === 'safety_exit' ||
         (a && (a.safety_level === 'danger' || a.safety_level === 'crisis'));
       document.body.toggleAttribute('data-sober', !!sober);
+    }
+
+    /* ---------- 安全结束页渲染：文案全部来自后端安全模块（judgement / see_doctor），
+       前端不硬编任何安全内容。crisis（心理危机）与 danger（急性身体信号）用不同标题。 ---------- */
+    function renderSafetyExit(a) {
+      a = a || {};
+      const crisis = a.safety_level === 'crisis';
+      document.getElementById('safetyExitTag').textContent = crisis ? '你不是一个人' : '先照顾好身体';
+      document.getElementById('safetyExitTitle').innerHTML = crisis ? '今晚<br>好好休息' : '今晚先<br>停下来';
+      // judgement 是后端安全模块写好的休息/关怀表述；缺就给一句兜底（不涉及具体医疗内容）
+      document.getElementById('safetyExitBody').textContent = a.judgement || '今晚先别安排事情，好好休息。';
+      // see_doctor：danger=就医提醒 / crisis=求助文案，均来自后端常量
+      document.getElementById('safetyExitDoctor').textContent = a.see_doctor || '';
     }
 
     /* ---------- 结论屏大字 + 关键词琥珀高亮（第 5 条）----------
@@ -1228,6 +1266,8 @@
       localStorage.removeItem(DECLINED_KEY);
       startNight();
     });
+    // 安全结束页「回到首页」：只切回 home（当天建议仍是 danger/crisis，下次进来 state 仍会判回安全结束页）
+    document.getElementById('safetyExitHome').addEventListener('click', () => show('home'));
 
     /* ---------- 补充一句（noteSheet）/ 树洞 → /api/free_input ---------- */
     // generateIfNone：当天还没建议时，是否接着生成今晚安排。
@@ -1571,6 +1611,16 @@
         document.title='CONFIRM 按钮文案="'+(btn?btn.textContent:'?')+'" 底部toast显示='+!!toastShown+' 按钮禁用='+(btn&&btn.disabled);
       },200);
     },1200);}
+
+
+
+
+
+
+
+
+
+
 
 
 
