@@ -851,6 +851,8 @@ async def api_state(request: Request):
              "food": json.loads(m["food_json"]) if m["food_json"] else None}
             for m in meals
         ],
+        # 当天「补充/我要补充」说过的话（含时间），前端常驻展示，让补充看得见
+        "today_notes": db.get_free_inputs_detailed(user_id, clock.today()),
         "virtual_now": clock.now().isoformat(),
         "virtual_now_display": clock.now_display(),
         "vday": clock.today(),

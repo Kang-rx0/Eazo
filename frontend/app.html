@@ -132,6 +132,9 @@
             </button>
           </div>
         </div>
+        <!-- 补充内容常驻列表：「我要补充」说过的话留在这，让补充看得见（不再提交完就消失）。
+             由 refreshState 按 today_notes 渲染。 -->
+        <ul class="meallog" id="notesLog" hidden></ul>
         <!-- 饮食记录常驻列表：上传后在 home 留一条「HH:MM 记了一条饮食：XX」，
              让用户看得见传成功了（不只是转瞬即逝的回执）。由 refreshState 按 today_meals 渲染。 -->
         <ul class="meallog" id="mealLog" hidden></ul>
@@ -175,8 +178,9 @@
       </div>
       <div class="foot">
         <button class="btn primary" type="button" id="confirmOk">判断大致没错</button>
+        <!-- 「身体不舒服」与「我要补充」本是同一条 /api/free_input 管道，合并为一个入口：
+             不舒服也在「我要补充」里说一句即可（home 屏保留独立的身体不舒服快捷）。 -->
         <button class="btn ghost" type="button" data-note-open>我要补充</button>
-        <button class="safety" type="button" data-safety-exit>身体不舒服</button>
       </div>
     </section>
 
@@ -710,6 +714,7 @@
         document.querySelectorAll('[data-panel-name="receipt"]').forEach(p => p.hidden = true);
       }
       renderMealLog(state);   // home 常驻饮食记录列表
+      renderNotes(state);     // home 常驻补充内容列表
       if (state.view === 'advice') renderAdvice(state.today_advice);
       // 夜间闭环：锁定态还有效吗？安全升级到 danger/crisis 时强制退出锁定（安全永远赢过锁定）
       const a = state.view === 'advice' ? state.today_advice : null;
@@ -775,6 +780,26 @@
         s.textContent = failed
           ? ' 记了一条饮食（没认清）'
           : ` 记了一条饮食：${food.名称 || food.name || '一条饮食'}`;
+        li.append(t, s);
+        log.appendChild(li);
+      });
+      log.hidden = false;
+    }
+
+    /* ---------- home 补充内容常驻列表：「我要补充」说过的话看得见（HH:MM 你说：XX），
+       不再提交完就消失。按 today_notes（当天）渲染，跨天自动清空。 ---------- */
+    function renderNotes(state) {
+      const log = document.getElementById('notesLog');
+      if (!log) return;
+      const notes = (state && state.today_notes) || [];
+      if (!notes.length) { log.hidden = true; log.innerHTML = ''; return; }
+      log.innerHTML = '';
+      notes.forEach(n => {
+        const li = document.createElement('li');
+        const t = document.createElement('b');
+        t.textContent = n.vtime;   // 后端已存 HH:MM
+        const s = document.createElement('span');
+        s.textContent = ` 你说：${n.text}`;
         li.append(t, s);
         log.appendChild(li);
       });
@@ -1161,7 +1186,10 @@
     document.getElementById('byeBack').addEventListener('click', () => show('home'));
 
     /* ---------- 补充一句（noteSheet）/ 树洞 → /api/free_input ---------- */
-    async function sendFree(text, sourceInput) {
+    // generateIfNone：当天还没建议时，是否接着生成今晚安排。
+    //「我要补充」（合并了原「身体不舒服」）传 true——保留原身体不舒服的行为：说一句直接开始今晚；
+    // 树洞（home 随手说一句）传 false/缺省——只记下，不替用户触发生成。
+    async function sendFree(text, sourceInput, generateIfNone) {
       if (!text.trim()) return;
       setLoading(true);
       const data = await api('/api/free_input', { text: text.trim() });
@@ -1169,19 +1197,24 @@
       if (!data) return;
       if (data.error) { toast(data.error); return; }
       if (data.rejected) { await refreshState(); return; }
-      sourceInput.value = '';
+      if (sourceInput) sourceInput.value = '';
       if (data.advice) {
         currentAdvice = data.advice;
         await refreshState();
         toast(data.advice.severe_notice ? data.advice.severe_notice : '已把这句话考虑进去，建议更新了');
+      } else if (generateIfNone) {
+        await refreshState();            // 先让补充记录立即出现在常驻列表
+        await doOffwork({});             // 当天还没建议：接着生成今晚安排
       } else {
+        await refreshState();            // 树洞：记下即可，刷新出常驻记录
         toast(data.message || '已记下');
       }
     }
     document.getElementById('noteSubmit').addEventListener('click', () => {
       const el = document.getElementById('noteText');
       closeSheets();
-      sendFree(el.value, el);
+      // 合并了「身体不舒服」：当天还没建议时，说一句就直接开始生成今晚安排
+      sendFree(el.value, el, true);
     });
     /* ---------- 树洞 / 食记：Home 与锁定屏各有一份同构 DOM（Q2），
        所以下面全部用事件委托 + 就近 [data-tools] 取元素，不依赖全局 id ---------- */
