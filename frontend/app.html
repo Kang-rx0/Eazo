@@ -236,9 +236,10 @@
       </div>
       <div class="foot">
         <button class="btn primary" type="button" id="acceptBtn">就这样</button>
-        <!-- 第 6 条：安全出口收敛到 Home + s-confirm 两处，结论屏这里移除。
-             「我要补充」走的是同一条 /api/free_input 管道、同样全量过三层安全检测（Q3 已确认不算降级） -->
+        <!-- 「我要补充」走的是同一条 /api/free_input 管道、同样全量过三层安全检测（Q3 已确认不算降级） -->
         <button class="btn ghost" type="button" data-note-open>我要补充</button>
+        <!-- 放弃今晚：从「我要补充」抽屉挪到这里的低调位置（放弃是终止动作，不属于"补充"语境）。 -->
+        <button class="textlink" type="button" id="adviceBye" style="display:block;margin:8px auto 0;opacity:.6">今天不做</button>
       </div>
     </section>
 
@@ -457,11 +458,7 @@
         <button class="btn" type="button" data-correct="难度再低一点">再轻一点</button>
         <button class="btn" type="button" data-correct="难度再高一点" id="btnHarder">再加一点</button>
       </div>
-      <div class="minor" style="margin-top:8px">
-        <button class="btn" type="button" data-correct="其实我做了">其实昨晚我做了</button>
-      </div>
     </div>
-    <button class="textlink" type="button" id="noteBye" style="display:block;margin:10px auto 0">今天不做</button>
   </section>
 
   <section class="calibration-sheet" id="adjustSheet" role="dialog" aria-modal="true" hidden>
@@ -1214,8 +1211,8 @@
         }
       }));
 
-    /* ---------- 今天不做 → s-bye（③-16 配套：不调接口、不记录） ---------- */
-    document.getElementById('noteBye').addEventListener('click', () => {
+    /* ---------- 今天不做（建议页低调入口）→ s-bye（③-16 配套：不调接口、不记录） ---------- */
+    document.getElementById('adviceBye').addEventListener('click', () => {
       closeSheets();
       // 今晚不做＝当天终止态：清掉建议与夜间锁定，写 declined，避免之后从 home「开始今晚」
       // 又被旧建议复活（问题3）。跨天自动失效。
