@@ -35,9 +35,29 @@ html,body{margin:0;padding:0}
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC",monospace;
 }
 
+/* 亮色主题：用户在设置里切换（data-theme="light" 挂在 body 上，localStorage 记忆）。
+   只覆写表面/文字/边框，保留琥珀主色的品牌识别。默认（无 data-theme 或 =dark）为夜色。
+   注意：安全模式 body[data-sober] 写在后面 + 更高特指度，永远盖过主题（安全永远赢）。 */
+body[data-theme="light"]{
+  --ink:#F4F1EA;      /* 画布：暖米白 */
+  --ink-2:#FBF9F4;    /* 卡片 */
+  --ink-3:#EAE5DA;    /* 内嵌块 */
+  --text:#1F1B24;     /* 主文字 */
+  --muted:#6A6474;    /* 次文字 */
+  --line-2:#9A93A5;   /* 可点边界 */
+  --line:#D8D2C6;     /* 装饰分隔 */
+  --amber:#C77A00;    /* 主色在亮底上压深，保证对比度 */
+  --on-amber:#FFFFFF; /* 琥珀底上的文字 */
+  --mint:#0E9F6E;     /* 值夜说话那句，亮底压深 */
+  --scrim:#00000055;  /* 弹窗遮罩 */
+}
+
 /* 安全模式：整套变量覆写，色相全部抽掉。只由后端安全信号触发（safety_level/rejected），
-   不做主题开关。挂在 body 上：body[data-sober]。 */
-body[data-sober]{
+   不做主题开关。挂在 body 上：body[data-sober]。写在主题之后 + body[data-sober]
+   与 body[data-theme] 同特指度时靠源顺序取胜，且额外用 body[data-sober][data-theme]
+   兜住"亮色+安全"的组合，确保安全模式永远压过主题。 */
+body[data-sober],
+body[data-sober][data-theme="light"]{
   --ink:#17171A; --ink-2:#212126; --ink-3:#2B2B31;
   --line:#3A3A41; --line-2:#6E6E77;
   --text:#EDEDEF; --muted:#B3B3BA;
@@ -117,6 +137,20 @@ body[data-sober] .face::after{
 .navicon svg{width:20px; height:20px; display:block}
 .navicon[hidden]{display:none !important}
 .navicon.gear{margin:0 -10px 0 auto}
+
+/* ---------- 头像入口：右上角常驻，点进「我的设置」。文字头像（用户名首字），
+   不做图片上传——低负担调性。琥珀描边呼应品牌主色。 ---------- */
+.avatar{
+  flex:0 0 auto; width:36px; height:36px; margin:0 0 0 auto;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:50%; cursor:pointer; padding:0;
+  background:var(--ink-3); border:1.5px solid var(--amber);
+  color:var(--amber); font-family:var(--sans); font-weight:600; font-size:15px;
+  -webkit-tap-highlight-color:transparent; transition:transform .16s ease, background .16s ease;
+}
+.avatar:hover,.avatar:active{transform:scale(1.05); background:var(--ink-2)}
+.avatar[hidden]{display:none !important}
+.avatar span{line-height:1; text-transform:uppercase}
 
 /* ---------- 屏幕容器 ---------- */
 .screens{position:relative; flex:1 1 auto; min-height:0}

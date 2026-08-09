@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>值夜</title>
   <link rel="stylesheet" href="nightwatch.css">
+  <!-- 主题预设：在样式应用前尽早读取，避免开屏先暗后亮的闪烁 -->
+  <script>if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-preload-light','1');</script>
   <style>
+    /* 预载亮色：body 未就绪前先把 html 背景垫成亮色，消除闪烁 */
+    html[data-preload-light]{background:#F4F1EA}
     /* 本页专属的少量补充：提醒条卡片 + 回执快捷行 + 安全渲染基础位（P5 收口视觉） */
     .remindbar{
       margin:16px 0 0; padding:13px 15px;
@@ -53,8 +57,8 @@
         <s>今晚值班</s>
       </div>
     </div>
-    <button class="navicon gear" type="button" id="navGear" aria-label="设置" hidden>
-      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="5" cy="10" r="1.5" fill="currentColor"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/><circle cx="15" cy="10" r="1.5" fill="currentColor"/></svg>
+    <button class="avatar" type="button" id="navGear" aria-label="我的设置" hidden>
+      <span id="avatarInitial">·</span>
     </button>
   </header>
 
@@ -336,6 +340,13 @@
             <button class="switch" type="button" id="reminderSwitch" role="switch" aria-checked="true" aria-label="下班时找我"></button>
           </div></li>
         </ul>
+        <p class="setgroup">外观</p>
+        <ul class="setlist">
+          <li><div class="setrow" style="cursor:default">
+            <span class="lab"><b>亮色主题</b><s>默认夜色；白天觉得暗就开这个</s></span>
+            <button class="switch" type="button" id="themeSwitch" role="switch" aria-checked="false" aria-label="亮色主题"></button>
+          </div></li>
+        </ul>
         <p class="setgroup">回看</p>
         <ul class="setlist">
           <li><button class="setrow" type="button" id="historyEntry">
@@ -491,6 +502,7 @@
     let pendingCalibration;      // 回执优先时暂存的校准（B2 牵连 5）
     let pendingOffworkPayload;   // 回执答完后继续生成用
     let recallRecordId = null;
+    let lastMealId = null;       // 最近一张食记的 id（回执删除/跨天重置用）
 
     /* ---------- 基础件 ---------- */
     let toastTimer = null;
@@ -527,7 +539,10 @@
       document.querySelectorAll('.screen').forEach(s =>
         s.id === 's-' + name ? s.setAttribute('data-active', '') : s.removeAttribute('data-active'));
       document.getElementById('navBack').hidden = !(name in BACK_TO);
-      document.getElementById('navGear').hidden = name !== 'home';
+      // 头像入口常驻在非核心屏；建议流程(confirm/advice)与锁定/死胡同屏(accepted/done/bye/rejected)
+      // 不放分心入口——这些屏本就无返回、要么正在决策、要么已收尾。
+      const AVATAR_SHOWN = new Set(['home', 'settings', 'history', 'about']);
+      document.getElementById('navGear').hidden = !AVATAR_SHOWN.has(name);
       const body = document.querySelector(`#s-${name} .body`);
       if (body) body.scrollTop = 0;
     }
@@ -659,6 +674,12 @@
       }
       renderYesterdayLine(state.yesterday_feedback);
       renderRecall(state);
+      // 食记回执随「当天」生命周期：后端 today_meals 只含当天记录，跨天自动为空。
+      // 空则收起回执面板（含 lastMealId），避免昨天那条「记下了 XX」赖在主页/锁定屏。
+      if (!state.today_meals || state.today_meals.length === 0) {
+        lastMealId = null;
+        document.querySelectorAll('[data-panel-name="receipt"]').forEach(p => p.hidden = true);
+      }
       if (state.view === 'advice') renderAdvice(state.today_advice);
       // 夜间闭环：锁定态还有效吗？安全升级到 danger/crisis 时强制退出锁定（安全永远赢过锁定）
       const a = state.view === 'advice' ? state.today_advice : null;
@@ -729,7 +750,10 @@
           currentAdvice = data.advice;
           renderAdvice(data.advice); show('advice');
           toast(`已改为「${fb}」，今晚建议已按新档位重新生成`);
-        } else if (currentAdvice) {
+        } else if (lastState && lastState.view === 'advice' && currentAdvice) {
+          // 今天确实已生成建议（后端 view=advice）才回建议屏。
+          // 修 bug：跨天后 currentAdvice 可能还留着昨晚那份，只看它非空会误跳；
+          // 必须以后端当天 view 为准——第二天只答昨晚回执时 view=home，应停在 Home。
           show('advice');
           toast(`已记下：${fb}`);
         } else if (pendingOffworkPayload !== undefined) {
@@ -795,7 +819,8 @@
       return true;
     }
     async function startNight() {
-      if (currentAdvice) { show('advice'); return; }
+      // 只有后端确认今天已有建议时才直接回建议屏；否则跨天残留的昨晚 currentAdvice 会误跳
+      if (currentAdvice && lastState && lastState.view === 'advice') { show('advice'); return; }
       // 先拉一次最新 state（confirm_hint 里的剩余分钟跟着虚拟时钟走）
       const res = await fetch('/api/state', { headers: AUTH });
       if (res.ok) { lastState = await res.json(); paintClocks(lastState); }
@@ -1141,27 +1166,38 @@
     });
 
     /* ---------- 食记：单张上传（③-15）+ 确认句 + 记错了？删除。
-       锁定屏上传只做识别记录，不触发重算（现行为，Q2 明确保持） ---------- */
-    let lastMealId = null;
+       锁定屏上传只做识别记录，不触发重算（现行为，Q2 明确保持）。
+       lastMealId 声明已提到顶部状态区（refreshState 会引用它做回执重置）。 ---------- */
     document.addEventListener('change', async e => {
       const input = e.target.closest && e.target.closest('[data-photo-input]');
       if (!input || !input.files.length) return;
       const scope = toolsOf(input);
       const form = new FormData();
       form.append('file', input.files[0]);
-      toast('认一下这是什么…', true);
-      const res = await fetch('/api/meal/photo', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token },
-        body: form,
-      });
-      const data = await res.json();
-      input.value = '';
-      hideToast();
-      if (!res.ok || !data.ok) { toast(data.error || '没认出来，晚点再试'); return; }
-      lastMealId = data.meal_id;
-      pick(scope, '[data-photo-msg]').textContent = data.message;
-      pick(scope, '[data-panel-name="receipt"]').hidden = false;
+      // 识别可能较慢（服务端要调视觉模型）：给个明确的进行态 + 45s 超时兜底，
+      // 避免网络慢时常驻 toast 一直挂着、界面像卡死（原始反馈）。
+      toast('在认这是什么…可能要等一小会儿', true);
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 45000);
+      try {
+        const res = await fetch('/api/meal/photo', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token },
+          body: form,
+          signal: ctrl.signal,
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { toast(data.error || '没认出来，晚点再试'); return; }
+        lastMealId = data.meal_id;
+        pick(scope, '[data-photo-msg]').textContent = data.message;
+        pick(scope, '[data-panel-name="receipt"]').hidden = false;
+      } catch (err) {
+        toast(err.name === 'AbortError' ? '这张认得有点久，先跳过，晚点再试' : '网络不太稳，照片没传上，再试一次');
+      } finally {
+        clearTimeout(timer);
+        input.value = '';
+        hideToast();   // 无论成功失败/超时，进行态一定收起
+      }
     });
     async function deleteMeal(scope) {
       if (!lastMealId) return;
@@ -1257,6 +1293,25 @@
       toast(on ? '好，到点我会来问一句' : '好，不来打扰了（这里随时能再开）');
       if (lastState) checkReminder(lastState);
     });
+    // 亮色主题开关：切 body[data-theme] + 存 localStorage。安全模式(data-sober)优先级更高，不受影响。
+    const themeSwitch = document.getElementById('themeSwitch');
+    function applyTheme(light) {
+      document.body.toggleAttribute('data-theme', light);
+      if (light) document.body.setAttribute('data-theme', 'light');
+      themeSwitch.setAttribute('aria-checked', String(light));
+    }
+    applyTheme(localStorage.getItem('theme') === 'light');
+    themeSwitch.addEventListener('click', () => {
+      const light = localStorage.getItem('theme') !== 'light';
+      localStorage.setItem('theme', light ? 'light' : 'dark');
+      applyTheme(light);
+    });
+    // 头像首字：用登录时存的用户名
+    const avaInitial = document.getElementById('avatarInitial');
+    if (avaInitial) {
+      const uname = (localStorage.getItem('username') || '').trim();
+      avaInitial.textContent = uname ? uname[0] : '·';
+    }
     // 历史回看（B4）：每次进入现拉，只读
     document.getElementById('historyEntry').addEventListener('click', async () => {
       show('history');

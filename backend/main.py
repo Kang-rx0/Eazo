@@ -81,6 +81,36 @@ async def api_register(payload: dict):
     return {"token": _issue_token(user_id)}
 
 
+@app.post("/api/auth")
+async def api_auth(payload: dict):
+    """登录/注册合一（前端单按钮「进入」）：
+    - 用户名不存在 → 自动注册并发 token（返回 new=True）
+    - 用户名存在 + 密码正确 → 登录发 token（new=False）
+    - 用户名存在 + 密码错误 → 401 明确提示（避免打错用户名时无感知新建账号）
+    保留 /api/login、/api/register 不动，契约兼容。"""
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"error": "用户名和密码不能为空"})
+    user = db.get_user_by_username(username)
+    if user is None:
+        salt = secrets.token_hex(8)
+        try:
+            user_id = db.create_user(
+                username, f"{salt}${_hash_password(password, salt)}", clock.now().isoformat()
+            )
+        except sqlite3.IntegrityError:
+            return JSONResponse(status_code=409, content={"error": "网络有点挤，再点一次"})
+        logger.info("user=%s event=register 注册成功 user_id=%s", username, user_id)
+        return {"token": _issue_token(user_id), "new": True}
+    salt, stored_hash = user["password_hash"].split("$", 1)
+    if _hash_password(password, salt) != stored_hash:
+        logger.info("user=%s event=auth 密码错误", username)
+        return JSONResponse(status_code=401, content={"error": "这个用户名已被使用，密码不对"})
+    logger.info("user=%s event=login 登录成功", username)
+    return {"token": _issue_token(user["id"]), "new": False}
+
+
 @app.post("/api/login")
 async def api_login(payload: dict):
     """登录：{username, password} → {token}。其后请求带 Authorization: Bearer <token>。"""
