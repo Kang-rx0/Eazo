@@ -1259,6 +1259,9 @@
         lastMealId = data.meal_id;
         pick(scope, '[data-photo-msg]').textContent = data.message;
         pick(scope, '[data-panel-name="receipt"]').hidden = false;
+        // 立即刷新，让 home 常驻记录马上出现（不必等下次时钟/操作触发 refreshState）。
+        // 此时 today_meals 必非空，不会误触发「空则收起回执」逻辑。
+        await refreshState();
       } catch (err) {
         toast(err.name === 'AbortError' ? '这张认得有点久，先跳过，晚点再试' : '网络不太稳，照片没传上，再试一次');
       } finally {
@@ -1437,6 +1440,7 @@
       await refreshState();
     })();
   
+
 </script>
 </body>
 </html>
