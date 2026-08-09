@@ -39,15 +39,28 @@
        克制版——硬阴影/倾角仍只留给印章，这里用轻阴影，让每条成为可快速扫读的独立单元）。
        解散基础 .plan 的整框列表：去外框/背景/overflow，改成卡片间留白。 */
     #s-accepted .plan{
-      margin-top:16px; border:0; border-radius:0; background:transparent; overflow:visible;
-      display:flex; flex-direction:column; gap:12px;
+      margin-top:22px; border:0; border-radius:0; background:transparent; overflow:visible;
+      display:flex; flex-direction:column; gap:18px;
     }
+    /* 每条建议＝一张独立纸片卡：复用印章的硬阴影（零模糊纯位移）+ 圆角 + 轻微倾角 +
+       清晰序号，让它成为可快速扫读的独立单元。层次仍低于印章：印章 6px/琥珀/-1.2° 是峰值，
+       卡片用 5px 位移/墨色边/更小倾角。 */
     #s-accepted .plan li{
-      border:1.5px solid var(--line); border-bottom:1.5px solid var(--line);
+      border:2px solid var(--on-amber); border-bottom:2px solid var(--on-amber);
       border-radius:var(--r); background:var(--ink-2);
-      box-shadow:0 2px 10px rgba(0,0,0,.28);   /* 轻阴影：卡片感但不抢印章的硬阴影峰值 */
-      padding:15px 16px;
+      box-shadow:5px 5px 0 0 #0C0A12;   /* 硬阴影：和印章同语言，位移略小 */
+      padding:16px 17px; gap:13px; align-items:center;
     }
+    /* 轻微倾角，三条交替，像随手叠起的纸片 */
+    #s-accepted .plan li:nth-of-type(1){transform:rotate(-0.8deg)}
+    #s-accepted .plan li:nth-of-type(2){transform:rotate(0.6deg)}
+    #s-accepted .plan li:nth-of-type(3){transform:rotate(-0.5deg)}
+    /* 清晰序号：徽标放大、加边，扫一眼就能定位第几条 */
+    #s-accepted .plan li b{
+      width:30px; height:30px; border-radius:9px; font-size:15px;
+      border:2px solid var(--on-amber); margin-top:0;
+    }
+    #s-accepted .plan li[data-key] b{border-color:var(--amber)}
     /* 时钟条从 3 按钮扩到 7 按钮（第 1 条）：430px 单行会把日期挤成省略号，
        改成折行——时间独占一行、按钮一行，两行都完整可读 */
     .clockbar{flex-wrap:wrap; row-gap:5px; gap:6px}
