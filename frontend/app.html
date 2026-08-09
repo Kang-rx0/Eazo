@@ -340,9 +340,22 @@
       <div class="body">
         <h1>设置</h1>
         <p class="setgroup">关于你</p>
+        <!-- 每个字段一个精确入口（sec 直达对应那一屏），改完即返回，不必一屏屏往下走（问题1） -->
         <ul class="setlist">
-          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1'">
-            <span class="lab"><b>基本情况</b><s>作息、通勤、饮食、身体边界</s></span><span class="chev">›</span>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-1'">
+            <span class="lab"><b>上下班时间</b><s>倒推今晚还剩多少时间</s></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-2'">
+            <span class="lab"><b>工作日身体</b><s>久坐还是走动，累在哪</s></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-3'">
+            <span class="lab"><b>平时怎么吃饭</b><s>三餐主要靠什么解决</s></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-4'">
+            <span class="lab"><b>要绕开的</b><s>饮食禁忌与过敏</s></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-5'">
+            <span class="lab"><b>起床时间</b><s>用来倒推今晚几点该停</s></span><span class="chev">›</span>
           </button></li>
           <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=pref'">
             <span class="lab"><b>常吃的东西</b><s>顺着爱好给最轻的改法</s></span><span class="chev">›</span>

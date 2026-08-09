@@ -593,13 +593,10 @@
 
     /* ---------- 启动 ---------- */
     if (editMode) {
-      // 编辑态：「存好了」升为主按钮；「下一步」降为幽灵按钮留着（没带 sec 进来时也能走到别的步），
-      // 「走完了」与跳过链接藏掉（编辑态没有"跳过"语义）
+      // 编辑态＝改单个字段：每屏只留「存好了」（改完即返回设置），
+      // 「下一步」「走完了」「跳过」全藏掉——不再诱导用户一屏屏往下走（问题1）。
       document.querySelector('[data-finish]').hidden = true;
-      document.querySelectorAll('[data-next]').forEach(b => {
-        if (b.hasAttribute('data-skip')) { b.hidden = true; return; }
-        b.classList.remove('primary'); b.classList.add('ghost');
-      });
+      document.querySelectorAll('[data-next]').forEach(b => { b.hidden = true; });
       document.querySelectorAll('[data-save]').forEach(b => { b.hidden = false; b.style.order = '-1'; });
       // 「今天」那一组问的是今天、不进 profile，改基本情况时不该出现（v0.2 data-todayonly 语义）
       document.querySelectorAll('[data-todayonly]').forEach(g => g.hidden = true);
