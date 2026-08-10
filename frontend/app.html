@@ -51,10 +51,11 @@
       box-shadow:5px 5px 0 0 #0C0A12;   /* 硬阴影：和印章同语言，位移略小 */
       padding:16px 17px; gap:13px; align-items:center;
     }
-    /* 轻微倾角，三条交替，像随手叠起的纸片 */
-    #s-accepted .plan li:nth-of-type(1){transform:rotate(-0.8deg)}
-    #s-accepted .plan li:nth-of-type(2){transform:rotate(0.6deg)}
-    #s-accepted .plan li:nth-of-type(3){transform:rotate(-0.5deg)}
+    /* 轻微倾角，按「可见顺序」左右交替，像随手叠起的纸片。
+       不能用 nth-of-type：中间项（运动）缺席时，剩下 eat/stop 恰好都在奇数位、会同向偏——
+       所以由 renderLock 按可见序打 data-tilt，这里只按标记给方向。 */
+    #s-accepted .plan li[data-tilt="l"]{transform:rotate(-0.8deg)}
+    #s-accepted .plan li[data-tilt="r"]{transform:rotate(0.7deg)}
     /* 清晰序号：徽标放大、加边，扫一眼就能定位第几条 */
     #s-accepted .plan li b{
       width:30px; height:30px; border-radius:9px; font-size:15px;
@@ -247,7 +248,7 @@
              两个折叠块观感重复，合并成一块三行——依据(reason) / 来源(sources) / 怎么想的(trace)。
              信息一条不丢，trace 的安全层行照旧天然带出（②-24） -->
         <div class="srcs">
-          <button type="button" aria-expanded="false" data-acc="advWhy">为什么是这条线</button>
+          <button type="button" aria-expanded="false" data-acc="advWhy">判断依据和来源</button>
           <dl id="advWhy" hidden>
             <div><dt>依据</dt><dd id="advReason"></dd></div>
             <div id="advSourcesRow" hidden><dt>来源</dt><dd id="advSources"></dd></div>
@@ -590,6 +591,8 @@
     function show(name) {
       activeScreen = name;
       if (name === 'confirm') applyConfirmLock();
+      if (name === 'home') renderHomeCta();
+
       document.querySelectorAll('.screen').forEach(s =>
         s.id === 's-' + name ? s.setAttribute('data-active', '') : s.removeAttribute('data-active'));
       document.getElementById('navBack').hidden = !(name in BACK_TO);
@@ -599,6 +602,13 @@
       document.getElementById('navGear').hidden = !AVATAR_SHOWN.has(name);
       const body = document.querySelector(`#s-${name} .body`);
       if (body) body.scrollTop = 0;
+    }
+    /* Home 主按钮随「今晚是否已定」切换：已定态从锁定页点「回首页」回来后，
+       按钮不该还是「开始今晚」（会重走确认/生成），应是「查看今晚建议」→ 点回已定页。 */
+    function renderHomeCta() {
+      const locked = acceptedValid(lastState);
+      const btn = document.getElementById('startBtn');
+      btn.textContent = locked ? '查看今晚建议' : '开始今晚';
     }
     /* Q1：今晚建议已生成 → confirm 屏三处「改一下」置灰 + 提示行，改走「我要补充」 */
     function applyConfirmLock() {
@@ -713,6 +723,9 @@
       setLine('lockEat', a.eat);
       setLine('lockMove', a.move);
       setLine('lockStop', a.stop);
+      // 倾角按「可见顺序」左右交替：中间项缺席也严格交错，不会出现两张同向。
+      const vis = [...document.querySelectorAll('#lockPlan > li')].filter(li => !li.hidden);
+      vis.forEach((li, i) => li.setAttribute('data-tilt', i % 2 ? 'r' : 'l'));
     }
 
     /* ---------- 开屏/刷新：一切以 /api/state 为准（③-3/③-6）
@@ -945,6 +958,11 @@
       return true;
     }
     async function startNight() {
+      // 今晚已定：从 home 点「查看今晚建议」直接回已定页，不重走确认/生成。
+      if (acceptedValid(lastState)) {
+        const a = (lastState && lastState.view === 'advice' ? lastState.today_advice : null) || currentAdvice;
+        if (a) { renderLock(a); show(nightDone(lastState) ? 'done' : 'accepted'); return; }
+      }
       // 今晚已「不做」：默认收工，不从 home 复活今晚流程（问题3）。反悔走 s-bye 上的隐蔽入口「还是做吧」。
       if (declinedValid(lastState)) { toast('今晚先这样，明天见'); return; }
       // 只有后端确认今天已有建议时才直接回建议屏；否则跨天残留的昨晚 currentAdvice 会误跳
@@ -1154,9 +1172,9 @@
       spent.hidden = !commuteMin;
       spent.style.flex = `${commuteMin} 1 0`;
       document.getElementById('segFree').style.flex = `${freeMin} 1 0`;
-      document.getElementById('labSpent').textContent = commuteMin ? `路上 ${commuteMin} 分` : '';
+      document.getElementById('labSpent').textContent = commuteMin ? `路上 ${commuteMin} 分钟` : '';
       document.getElementById('labSpent').style.flex = `${commuteMin} 1 0`;
-      document.getElementById('labFree').textContent = `在家 ${freeMin} 分`;
+      document.getElementById('labFree').textContent = `可支配时间 ${freeMin} 分钟`;
       document.getElementById('labFree').style.flex = `${freeMin} 1 0`;
     }
 
@@ -1606,6 +1624,7 @@
         document.title='CONFIRM 按钮文案="'+(btn?btn.textContent:'?')+'" 底部toast显示='+!!toastShown+' 按钮禁用='+(btn&&btn.disabled);
       },200);
     },1200);}
+
 
 
 
