@@ -562,10 +562,10 @@
         if (primary) {
           _loadingBtn = primary;
           _loadingBtnText = primary.textContent;
-          primary.textContent = '正在想今晚怎么安排，大约十几秒…';
+          primary.textContent = '正在想今晚怎么安排…';
           primary.setAttribute('aria-busy', 'true');
         } else {
-          toast('正在想今晚怎么安排，大约十几秒…', true);   // 没有主按钮的屏（兜底）
+          toast('正在想今晚怎么安排…', true);   // 没有主按钮的屏（兜底）
         }
       } else {
         if (_loadingBtn) {
