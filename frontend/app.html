@@ -785,8 +785,13 @@
       // 但当前正停在 bye 屏则别打断（刚点完今天不做）。
       const declined = declinedValid(state) && !locked;
       const wantAdvice = state.view === 'advice' && !declined;
+      // 首夜（onboarding 刚完成）：不经过 home，直接落确认屏。confirm_hint 已在本次 state 里，
+      // renderConfirm 就地渲染即可——省掉「先 show('home') 再由 startNight 二次拉 state 跳 confirm」造成的 home 闪现。
+      // 仅在常规态（无锁定屏/未不做）接管；安全路由（rejected/safety_exit）已在上面 return。
+      const firstNight = !!(opts && opts.firstNight) && !nightScreen && !declined;
       if (!stay) {
-        if (declined && activeScreen === 'bye') { /* 停在 bye，不跳 */ }
+        if (firstNight && renderConfirm()) show('confirm');
+        else if (declined && activeScreen === 'bye') { /* 停在 bye，不跳 */ }
         else show(nightScreen || (wantAdvice ? 'advice' : 'home'));
       }
       else if (nightScreen && activeScreen !== nightScreen) show(nightScreen);
@@ -1594,14 +1599,12 @@
     (async () => {
       const res = await fetch('/api/profile', { headers: AUTH });
       if (res.ok) profile = (await res.json()).profile;
-      await refreshState();
-      // 首次完成 onboarding（?firstnight=1）：直接进「确认屏」看到今晚判断，不停在空 home。
-      // 仅当 refreshState 已落到 home/advice（非 rejected/锁定屏）时才接管——安全/异常路由优先。
+      // 首次完成 onboarding（?firstnight=1）：把信号传进 refreshState，让它在路由时直接落「确认屏」，
+      // 不先经过 home 再跳（消除 home 闪现）。参数先清，避免刷新/后退再触发。
       const params = new URLSearchParams(location.search);
-      if (params.get('firstnight') === '1') {
-        history.replaceState(null, '', location.pathname);   // 清掉参数，避免刷新/后退再触发
-        if (activeScreen === 'home' || activeScreen === 'advice') await startNight();
-      }
+      const isFirstNight = params.get('firstnight') === '1';
+      if (isFirstNight) history.replaceState(null, '', location.pathname);
+      await refreshState(isFirstNight ? { firstNight: true } : undefined);
       // 从资料页返回（app.html#settings）：稳稳落回设置屏，而不是 home（问题2）。
       // 仅在落到 home/advice 这类常规屏时接管，rejected/锁定屏等安全路由优先。
       if (location.hash === '#settings') {
