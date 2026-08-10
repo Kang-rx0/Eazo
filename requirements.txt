@@ -4,3 +4,4 @@ uvicorn
 openai
 numpy
 python-dotenv
+python-multipart
