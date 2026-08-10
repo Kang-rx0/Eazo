@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>值夜 · 登录</title>
+  <title>Lite Me · 登录</title>
   <link rel="stylesheet" href="nightwatch.css">
 </head>
 <body>
@@ -13,8 +13,8 @@
     <div class="badge">
       <div class="face" data-mood="happy" aria-hidden="true"><i class="l"></i><i class="r"></i><u></u></div>
       <div>
-        <b>值夜</b>
-        <s>今晚值班</s>
+        <b>Lite Me</b>
+        <s>人类省电模式</s>
       </div>
     </div>
   </header>
@@ -35,28 +35,31 @@
           <input class="field" id="password" type="password" autocomplete="current-password" placeholder="别太复杂，够用就行">
         </div>
 
-        <!-- 错误提示：文案表意，不靠颜色单独表意（DESIGN.md「状态不靠颜色单独表意」） -->
+        <!-- 登录/注册合一：第一次来就自动注册，来过就登录（文案表意，不靠颜色单独表意） -->
+        <p class="sub" style="margin-top:4px">第一次来会直接为你建好，来过就接着用。</p>
         <p class="note" id="msg" role="alert" hidden></p>
       </div>
       <div class="foot">
-        <button class="btn primary" type="button" id="loginBtn" onclick="submitAuth('/api/login')">登录</button>
-        <button class="btn ghost" type="button" id="registerBtn" onclick="submitAuth('/api/register')">第一次来，注册并进入</button>
+        <button class="btn primary" type="button" id="enterBtn" onclick="submitAuth()">进入</button>
         <button class="textlink" type="button" onclick="location.href='index.html'">回介绍页看看</button>
       </div>
     </section>
   </main>
 
   <script>
-    async function submitAuth(url) {
+    async function submitAuth() {
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value;
       const msg = document.getElementById('msg');
       msg.hidden = true; msg.textContent = '';
-      const login = document.getElementById('loginBtn');
-      const register = document.getElementById('registerBtn');
-      login.disabled = register.disabled = true;   // 防双击
+      if (!username || !password) {
+        msg.textContent = '用户名和密码都填一下'; msg.hidden = false; return;
+      }
+      const enter = document.getElementById('enterBtn');
+      enter.disabled = true;   // 防双击
       try {
-        const res = await fetch(url, {
+        // 登录/注册合一：没注册过自动注册，注册过则登录（密码错会明确提示）
+        const res = await fetch('/api/auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password }),
@@ -68,6 +71,7 @@
           return;
         }
         localStorage.setItem('token', data.token);
+        localStorage.setItem('username', username);   // 头像首字用
         // 拿到 token 后问后端该去哪个视图（文档 7.1）
         const state = await (await fetch('/api/state', {
           headers: { 'Authorization': 'Bearer ' + data.token },
@@ -77,12 +81,12 @@
         msg.textContent = '连不上服务，稍后再试一次';
         msg.hidden = false;
       } finally {
-        login.disabled = register.disabled = false;
+        enter.disabled = false;
       }
     }
     // 回车提交：低精力时刻少一次寻找按钮
     document.getElementById('password').addEventListener('keydown', e => {
-      if (e.key === 'Enter') submitAuth('/api/login');
+      if (e.key === 'Enter') submitAuth();
     });
   </script>
 </body>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>值夜 · 先认识一下</title>
+  <title>Lite Me · 先认识一下</title>
   <link rel="stylesheet" href="nightwatch.css">
 </head>
 <body>
@@ -18,8 +18,8 @@
     <div class="badge">
       <div class="face" data-mood="happy" aria-hidden="true"><i class="l"></i><i class="r"></i><u></u></div>
       <div>
-        <b>值夜</b>
-        <s>今晚值班</s>
+        <b>Lite Me</b>
+        <s>人类省电模式</s>
       </div>
     </div>
   </header>
@@ -300,10 +300,9 @@
       if (stepIdx > 0) show(STEPS[stepIdx - 1]);
     });
     function leaveEdit() {
-      // 从设置进来的（app.html）就回去；直接开的就去主界面
-      if (document.referrer && new URL(document.referrer).origin === location.origin
-          && document.referrer.includes('app.html')) history.back();
-      else location.href = 'app.html';
+      // 资料页都是从设置进来的：回到 app.html 并用 #settings 锚点稳稳落回设置屏
+      //（不用 history.back——app.html 会重新加载并 refreshState 到 home，丢掉"我在设置"这个状态，问题2）。
+      location.href = 'app.html#settings';
     }
 
     /* ---------- chips / opts 通用选择 ----------
@@ -574,8 +573,10 @@
         // 走的是现成的 /api/free_input 管道 —— 存库 + 生成时全量过三层安全检测，
         // 不是前端假显示。失败不拦路：档案已经存好了，别把人堵在 onboarding。
         await sendTodayOnly();
-        // 交给 app.html 按 /api/state 的 view 展示（rejected → 劝退屏，③-6）
-        location.href = 'app.html';
+        // 交给 app.html 按 /api/state 的 view 展示（rejected → 劝退屏，③-6）。
+        // 带 firstnight=1：首次完成直接进「确认屏」看到价值，不停在空 home
+        //（app.html 会在 view 为 home/advice 时据此自动进 confirm；rejected/onboarding 不受影响）。
+        location.href = 'app.html?firstnight=1';
       } catch (e) {
         toast('连不上服务，稍后再试一次');
       } finally {
@@ -592,13 +593,10 @@
 
     /* ---------- 启动 ---------- */
     if (editMode) {
-      // 编辑态：「存好了」升为主按钮；「下一步」降为幽灵按钮留着（没带 sec 进来时也能走到别的步），
-      // 「走完了」与跳过链接藏掉（编辑态没有"跳过"语义）
+      // 编辑态＝改单个字段：每屏只留「存好了」（改完即返回设置），
+      // 「下一步」「走完了」「跳过」全藏掉——不再诱导用户一屏屏往下走（问题1）。
       document.querySelector('[data-finish]').hidden = true;
-      document.querySelectorAll('[data-next]').forEach(b => {
-        if (b.hasAttribute('data-skip')) { b.hidden = true; return; }
-        b.classList.remove('primary'); b.classList.add('ghost');
-      });
+      document.querySelectorAll('[data-next]').forEach(b => { b.hidden = true; });
       document.querySelectorAll('[data-save]').forEach(b => { b.hidden = false; b.style.order = '-1'; });
       // 「今天」那一组问的是今天、不进 profile，改基本情况时不该出现（v0.2 data-todayonly 语义）
       document.querySelectorAll('[data-todayonly]').forEach(g => g.hidden = true);

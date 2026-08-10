@@ -35,9 +35,29 @@ html,body{margin:0;padding:0}
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC",monospace;
 }
 
+/* 亮色主题：用户在设置里切换（data-theme="light" 挂在 body 上，localStorage 记忆）。
+   只覆写表面/文字/边框，保留琥珀主色的品牌识别。默认（无 data-theme 或 =dark）为夜色。
+   注意：安全模式 body[data-sober] 写在后面 + 更高特指度，永远盖过主题（安全永远赢）。 */
+body[data-theme="light"]{
+  --ink:#F4F1EA;      /* 画布：暖米白 */
+  --ink-2:#FBF9F4;    /* 卡片 */
+  --ink-3:#EAE5DA;    /* 内嵌块 */
+  --text:#1F1B24;     /* 主文字 */
+  --muted:#6A6474;    /* 次文字 */
+  --line-2:#9A93A5;   /* 可点边界 */
+  --line:#D8D2C6;     /* 装饰分隔 */
+  --amber:#C77A00;    /* 主色在亮底上压深，保证对比度 */
+  --on-amber:#FFFFFF; /* 琥珀底上的文字 */
+  --mint:#0E9F6E;     /* 值夜说话那句，亮底压深 */
+  --scrim:#00000055;  /* 弹窗遮罩 */
+}
+
 /* 安全模式：整套变量覆写，色相全部抽掉。只由后端安全信号触发（safety_level/rejected），
-   不做主题开关。挂在 body 上：body[data-sober]。 */
-body[data-sober]{
+   不做主题开关。挂在 body 上：body[data-sober]。写在主题之后 + body[data-sober]
+   与 body[data-theme] 同特指度时靠源顺序取胜，且额外用 body[data-sober][data-theme]
+   兜住"亮色+安全"的组合，确保安全模式永远压过主题。 */
+body[data-sober],
+body[data-sober][data-theme="light"]{
   --ink:#17171A; --ink-2:#212126; --ink-3:#2B2B31;
   --line:#3A3A41; --line-2:#6E6E77;
   --text:#EDEDEF; --muted:#B3B3BA;
@@ -67,7 +87,7 @@ body{
   padding:calc(14px + env(safe-area-inset-top)) 18px 10px;
   display:flex; align-items:center; gap:10px;
 }
-.badge{display:flex; align-items:center; gap:9px; min-width:0}
+.badge{display:flex; align-items:center; gap:9px; min-width:0; flex:1 1 auto}
 /* 人像：34×34、11px 圆角（唯一例外档），纯 CSS 画两眼一嘴 */
 .face{
   position:relative; flex:0 0 auto;
@@ -117,6 +137,20 @@ body[data-sober] .face::after{
 .navicon svg{width:20px; height:20px; display:block}
 .navicon[hidden]{display:none !important}
 .navicon.gear{margin:0 -10px 0 auto}
+
+/* ---------- 头像入口：右上角常驻，点进「我的设置」。文字头像（用户名首字），
+   不做图片上传——低负担调性。琥珀描边呼应品牌主色。 ---------- */
+.avatar{
+  flex:0 0 auto; width:36px; height:36px; margin:0 0 0 auto;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:50%; cursor:pointer; padding:0;
+  background:var(--ink-3); border:1.5px solid var(--amber);
+  color:var(--amber); font-family:var(--sans); font-weight:600; font-size:15px;
+  -webkit-tap-highlight-color:transparent; transition:transform .16s ease, background .16s ease;
+}
+.avatar:hover,.avatar:active{transform:scale(1.05); background:var(--ink-2)}
+.avatar[hidden]{display:none !important}
+.avatar span{line-height:1; text-transform:uppercase}
 
 /* ---------- 屏幕容器 ---------- */
 .screens{position:relative; flex:1 1 auto; min-height:0}
@@ -695,6 +729,13 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
   max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   font-size:14.5px; line-height:1.5; font-weight:600;
 }
+/* 饮食记录常驻列表：轻量、不抢戏；时间用琥珀，正文用次要色 */
+.meallog{list-style:none; margin:14px 0 0; padding:0; display:flex; flex-direction:column; gap:6px}
+.meallog li{
+  font-size:13px; line-height:1.5; color:var(--muted);
+  padding:7px 11px; background:var(--ink-2); border:1px solid var(--line); border-radius:12px;
+}
+.meallog li b{color:var(--amber); font-weight:600; font-family:var(--mono); font-size:12.5px}
 .homepanel{
   --bubble-anchor:25%;
   position:relative; margin:0; padding:9px 15px;
@@ -710,20 +751,33 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
   bottom:-9px; left:calc(var(--bubble-anchor) - 7px);
   width:14px; height:10px; background:var(--ink-2);
 }
-.homepanel[data-bubble="meal"]{--bubble-anchor:75%}
-.homepanel .inline-row{position:relative}
+/* 箭头锚点跟随被点的格子：树洞=左格(默认25%)，食记/回执=右格(75%)。
+   选择器对齐实际属性名 data-panel-name（旧的 data-bubble 已被重构掉，故箭头一直指左格）。 */
+.homepanel[data-panel-name="meal"],
+.homepanel[data-panel-name="receipt"]{--bubble-anchor:75%}
+.homepanel .inline-row{position:relative; display:flex; align-items:center; gap:10px}
 .homepanel .field{
-  min-height:52px; padding:14px 34px 14px 0;
+  min-height:52px; padding:12px 4px 12px 0;
   background:transparent; border:0; border-radius:0;
 }
 .homepanel textarea.field{min-height:52px}
+/* 树洞输入聚焦：不套全局那圈刺眼的 3px 薄荷绿描边（既丑又跳色），
+   改成气泡容器本身描边提亮 + 轻微背景，安静地表示"在这里输入"。 */
+.homepanel:focus-within{border-color:var(--amber); background:var(--ink-3)}
+.homepanel .field:focus,
+.homepanel .field:focus-visible{outline:none}
+/* 送出按钮：不换行、够宽、垂直居中，跟输入框一行对齐 */
+.homepanel[data-panel-name="free"] .textlink{
+  flex:0 0 auto; white-space:nowrap; align-self:center;
+  min-height:40px; padding:8px 4px; font-weight:600;
+}
 .homepanel .mic{
   position:absolute; right:0; top:50%; transform:translateY(-50%);
 }
 .homepanel .note{margin:0; padding-top:0; border-top:0}
-.homepanel[data-bubble="meal"]{display:flex; align-items:center; gap:8px; min-height:52px}
-.homepanel[data-bubble="meal"] .note{flex:1 1 auto}
-.homepanel[data-bubble="meal"] .textlink{flex:0 0 auto; min-height:32px; padding:6px 0}
+.homepanel[data-panel-name="meal"]{display:flex; align-items:center; gap:8px; min-height:52px}
+.homepanel[data-panel-name="meal"] .note{flex:1 1 auto}
+.homepanel[data-panel-name="meal"] .textlink{flex:0 0 auto; min-height:32px; padding:6px 0}
 .photothumbs{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0}
 .photothumbs img{
   width:56px; height:56px; border-radius:12px; border:1px solid var(--line);

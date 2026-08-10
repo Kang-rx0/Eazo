@@ -393,6 +393,20 @@ def get_free_inputs(user_id: int, vday: str) -> list[str]:
         conn.close()
 
 
+def get_free_inputs_detailed(user_id: int, vday: str) -> list[dict]:
+    """取某天全部自由输入，带时间（前端「补充」常驻列表用：显示 HH:MM + 原话）。
+    与 get_free_inputs 分开：那个只回纯文本、被安全扫描依赖，别动它的签名。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT vtime, text FROM free_inputs WHERE user_id = ? AND vday = ? ORDER BY vtime, id",
+            (user_id, vday),
+        ).fetchall()
+        return [{"vtime": r["vtime"], "text": r["text"]} for r in rows]
+    finally:
+        conn.close()
+
+
 def set_free_input_extracted(free_input_id: int, extracted_json: str) -> None:
     conn = get_conn()
     try:

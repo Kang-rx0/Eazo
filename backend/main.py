@@ -81,6 +81,36 @@ async def api_register(payload: dict):
     return {"token": _issue_token(user_id)}
 
 
+@app.post("/api/auth")
+async def api_auth(payload: dict):
+    """登录/注册合一（前端单按钮「进入」）：
+    - 用户名不存在 → 自动注册并发 token（返回 new=True）
+    - 用户名存在 + 密码正确 → 登录发 token（new=False）
+    - 用户名存在 + 密码错误 → 401 明确提示（避免打错用户名时无感知新建账号）
+    保留 /api/login、/api/register 不动，契约兼容。"""
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"error": "用户名和密码不能为空"})
+    user = db.get_user_by_username(username)
+    if user is None:
+        salt = secrets.token_hex(8)
+        try:
+            user_id = db.create_user(
+                username, f"{salt}${_hash_password(password, salt)}", clock.now().isoformat()
+            )
+        except sqlite3.IntegrityError:
+            return JSONResponse(status_code=409, content={"error": "网络有点挤，再点一次"})
+        logger.info("user=%s event=register 注册成功 user_id=%s", username, user_id)
+        return {"token": _issue_token(user_id), "new": True}
+    salt, stored_hash = user["password_hash"].split("$", 1)
+    if _hash_password(password, salt) != stored_hash:
+        logger.info("user=%s event=auth 密码错误", username)
+        return JSONResponse(status_code=401, content={"error": "这个用户名已被使用，密码不对"})
+    logger.info("user=%s event=login 登录成功", username)
+    return {"token": _issue_token(user["id"]), "new": False}
+
+
 @app.post("/api/login")
 async def api_login(payload: dict):
     """登录：{username, password} → {token}。其后请求带 Authorization: Bearer <token>。"""
@@ -631,10 +661,13 @@ async def api_meal_photo(file: UploadFile, request: Request):
         food = json.loads(m.group(0)) if m else None
     except Exception:
         food = None
-    if not food or not food.get("名称"):
-        # 兜底：识别失败也不报错、不阻塞（文档：演示中途不允许白屏或报错）
+    recognized = bool(food and food.get("名称"))
+    if not recognized:
+        # 兜底：识别失败也不报错、不阻塞（文档：演示中途不允许白屏或报错）。
+        # 用中性诚实措辞，不预设餐类（不硬叫「一餐饭/家常」，用户可能拍的是下午茶/水果/加餐）。
         logger.error("user=%s vision识别失败，走兜底", username)
-        food = {"名称": "一餐饭", "估计分量": "未知", "类别": "家常", "备注": "识别失败，仅记录用餐"}
+        food = {"名称": "没认清的一条", "估计分量": "未知", "类别": "未知",
+                "备注": "没能识别，仅作记录", "recognized": False}
 
     db_conn = db.get_conn()
     try:
@@ -648,10 +681,13 @@ async def api_meal_photo(file: UploadFile, request: Request):
         db_conn.commit()
     finally:
         db_conn.close()
-    logger.info("user=%s event=meal_photo 识别=%s", username, food.get("名称"))
-    # 轻确认，不评判、不展开（文档 7.3）；带 meal_id 供「记错了？删除」
-    return {"ok": True, "meal_id": meal_id, "food": food,
-            "message": f"记下了：{food['名称']}。晚上给你参考。"}
+    logger.info("user=%s event=meal_photo 识别=%s recognized=%s", username, food.get("名称"), recognized)
+    # 轻确认，不评判、不展开（文档 7.3）；带 meal_id 供「记错了？删除」。
+    # 识别失败时诚实告知，不假装认出来（用户可删/重传）。
+    message = (f"记下了：{food['名称']}。晚上给你参考。" if recognized
+               else "没太认出来，先记了一条。不对的话点下面删掉、或换张清楚的再传。")
+    return {"ok": True, "meal_id": meal_id, "food": food, "recognized": recognized,
+            "message": message}
 
 
 @app.post("/api/meal/delete")
@@ -775,6 +811,11 @@ async def api_state(request: Request):
         record = db.get_daily_record(user_id, clock.today())
         today_advice = json.loads(record["advice_json"]) if record and record["advice_json"] else None
         view = "advice" if today_advice else "home"
+        # 明确高危身体/心理信号（danger/crisis）：硬退出到简洁安全结束页，不进「恢复建议 + 灰色 Home」。
+        # 建议仍照常生成并存库（留痕/安全审计）、today_advice 照常带回（结束页文案从中取，前端不硬编）；
+        # 这里只改「呈现」——安全检测/分级/enforce 逻辑一律不动。
+        if today_advice and today_advice.get("safety_level") in ("danger", "crisis"):
+            view = "safety_exit"
         pending = db.get_pending_records_before(user_id, clock.today())
         if pending:
             latest = pending[-1]
@@ -815,6 +856,8 @@ async def api_state(request: Request):
              "food": json.loads(m["food_json"]) if m["food_json"] else None}
             for m in meals
         ],
+        # 当天「补充/我要补充」说过的话（含时间），前端常驻展示，让补充看得见
+        "today_notes": db.get_free_inputs_detailed(user_id, clock.today()),
         "virtual_now": clock.now().isoformat(),
         "virtual_now_display": clock.now_display(),
         "vday": clock.today(),
