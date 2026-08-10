@@ -366,8 +366,12 @@ def _run_and_save_today(user_id: int, username: str, record=None,
     return advice
 
 
+# 带模型调用的路由用普通 def（不是 async）：FastAPI 会把 def 路由丢进线程池执行，
+# 同步的 LLM 调用只占一个工作线程，不再冻住整个事件循环——async def 体内同步调模型时，
+# 一个人生成建议的十几秒里全站所有请求（包括静态页和 /api/state）都得排队（NOTE.md 已知问题）。
+# api_feedback / api_correct / api_free_input 同理。
 @app.post("/api/offwork")
-async def api_offwork(request: Request, payload: dict | None = None):
+def api_offwork(request: Request, payload: dict | None = None):
     """「下班了」：先查昨日待回执（7.2），有则让前端先收回执；否则生成今晚建议。
     payload 可带 {"state": "今晚更累"}——生成前前端先问一句今晚状态，作为初始条件注入。"""
     user_id = _current_user_id(request)
@@ -429,7 +433,7 @@ async def api_offwork(request: Request, payload: dict | None = None):
 
 
 @app.post("/api/feedback")
-async def api_feedback(payload: dict, request: Request):
+def api_feedback(payload: dict, request: Request):
     """昨晚回执四档 + 跳过。允许当天内改回执（点错了后悔）：
     若今天的建议已生成且新回执导致档位变化，按新档位重跑 Agent 并返回新建议。
     """
@@ -448,34 +452,37 @@ async def api_feedback(payload: dict, request: Request):
                 username, record["id"], record["vday"], feedback)
 
     # 改回执的连锁：今天建议已生成 + 新回执算出的档位不同 → 重算档位并重出今晚建议
-    today_rec = db.get_daily_record(user_id, clock.today())
-    if today_rec and today_rec["advice_json"] and record["vday"] < clock.today():
-        new_level = _compute_today_baseline(user_id)
-        if new_level != today_rec["baseline_level"]:
-            logger.info("user=%s 回执修改导致档位 %s→%s，重出今晚建议",
-                        username, today_rec["baseline_level"], new_level)
-            conditions = json.loads(today_rec["conditions_json"] or "{}")
-            conditions["档位"] = new_level
-            rec = dict(today_rec) | {
-                "conditions_json": json.dumps(conditions, ensure_ascii=False),
-                "baseline_level": new_level,
-            }
-            db_conn = db.get_conn()
-            try:
-                db_conn.execute("UPDATE daily_records SET baseline_level = ? WHERE id = ?",
-                                (new_level, today_rec["id"]))
-                db_conn.commit()
-            finally:
-                db_conn.close()
-            extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
-            extra.append("用户刚修改了昨晚的回执，今晚档位已按新回执重算")
-            advice = _run_and_save_today(user_id, username, record=rec, extra_conditions=extra)
-            return {"ok": True, "feedback": feedback, "advice": advice, "new_level": new_level}
+    # 与 /api/offwork 同一把用户锁：读记录→改档位→重生成必须整段原子，路由进线程池后
+    # 是真并发，不锁的话和「下班了」/其它纠正并发会双重生成、互相覆盖
+    with _user_lock(user_id):
+        today_rec = db.get_daily_record(user_id, clock.today())
+        if today_rec and today_rec["advice_json"] and record["vday"] < clock.today():
+            new_level = _compute_today_baseline(user_id)
+            if new_level != today_rec["baseline_level"]:
+                logger.info("user=%s 回执修改导致档位 %s→%s，重出今晚建议",
+                            username, today_rec["baseline_level"], new_level)
+                conditions = json.loads(today_rec["conditions_json"] or "{}")
+                conditions["档位"] = new_level
+                rec = dict(today_rec) | {
+                    "conditions_json": json.dumps(conditions, ensure_ascii=False),
+                    "baseline_level": new_level,
+                }
+                db_conn = db.get_conn()
+                try:
+                    db_conn.execute("UPDATE daily_records SET baseline_level = ? WHERE id = ?",
+                                    (new_level, today_rec["id"]))
+                    db_conn.commit()
+                finally:
+                    db_conn.close()
+                extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
+                extra.append("用户刚修改了昨晚的回执，今晚档位已按新回执重算")
+                advice = _run_and_save_today(user_id, username, record=rec, extra_conditions=extra)
+                return {"ok": True, "feedback": feedback, "advice": advice, "new_level": new_level}
     return {"ok": True, "feedback": feedback}
 
 
 @app.post("/api/correct")
-async def api_correct(payload: dict, request: Request):
+def api_correct(payload: dict, request: Request):
     """一击纠正：把纠正项作为新条件，重跑 Agent 主循环（文档 3.2）。"""
     user_id = _current_user_id(request)
     if user_id is None:
@@ -486,86 +493,89 @@ async def api_correct(payload: dict, request: Request):
     p = db.get_profile(user_id)
     if p is not None and p["severe_flag"]:
         return {"rejected": True, "message": safety.SEVERE_NOTICE}
-    record = db.get_daily_record(user_id, clock.today())
-    if record is None or not record["advice_json"]:
-        return JSONResponse(status_code=400, content={"error": "今天还没有建议，先点「下班了」"})
-    username = db.get_username(user_id)
-    logger.info("user=%s event=correct type=%s 重跑建议", username, ctype)
+    # 与 /api/offwork 同一把用户锁：三个分支都是"读记录→改条件→重生成"，整段原子，
+    # 防止和「下班了」/回执连锁/补充并发生成两条当日记录或互相覆盖
+    with _user_lock(user_id):
+        record = db.get_daily_record(user_id, clock.today())
+        if record is None or not record["advice_json"]:
+            return JSONResponse(status_code=400, content={"error": "今天还没有建议，先点「下班了」"})
+        username = db.get_username(user_id)
+        logger.info("user=%s event=correct type=%s 重跑建议", username, ctype)
 
-    # 难度微调（V2 追加）：只动今晚档位。措辞不进安全检测文本（"难度再高一点"不是
-    # 风险信号，不会被组合规则拦截）；上限受档位表约束——正常 4、慢性病 3（四镣铐）。
-    if ctype in ("难度再低一点", "难度再高一点"):
-        old_level = record["baseline_level"] if record["baseline_level"] is not None else 3
-        cap = 3 if safety.assess([], health_note=p["health_note"] if p else None,
-                                 chronic_condition=p["chronic_condition"] if p else None
-                                 )["chronic_managed"] else 4
-        new_level = max(0, min(cap, old_level + (1 if ctype == "难度再高一点" else -1)))
-        if new_level == old_level:
-            msg = ("今晚已经是最低档了——再低就只剩好好吃饭、早点睡了" if ctype == "难度再低一点"
-                   else "结合你的情况，今晚这个量已经是合适的上限了，先按这个来")
-            return {"ok": True, "message": msg, "advice": json.loads(record["advice_json"])}
+        # 难度微调（V2 追加）：只动今晚档位。措辞不进安全检测文本（"难度再高一点"不是
+        # 风险信号，不会被组合规则拦截）；上限受档位表约束——正常 4、慢性病 3（四镣铐）。
+        if ctype in ("难度再低一点", "难度再高一点"):
+            old_level = record["baseline_level"] if record["baseline_level"] is not None else 3
+            cap = 3 if safety.assess([], health_note=p["health_note"] if p else None,
+                                     chronic_condition=p["chronic_condition"] if p else None
+                                     )["chronic_managed"] else 4
+            new_level = max(0, min(cap, old_level + (1 if ctype == "难度再高一点" else -1)))
+            if new_level == old_level:
+                msg = ("今晚已经是最低档了——再低就只剩好好吃饭、早点睡了" if ctype == "难度再低一点"
+                       else "结合你的情况，今晚这个量已经是合适的上限了，先按这个来")
+                return {"ok": True, "message": msg, "advice": json.loads(record["advice_json"])}
+            record = dict(record)
+            conditions = json.loads(record["conditions_json"] or "{}")
+            conditions["档位"] = new_level
+            record["baseline_level"] = new_level
+            record["conditions_json"] = json.dumps(conditions, ensure_ascii=False)
+            conn = db.get_conn()
+            try:
+                conn.execute("UPDATE daily_records SET baseline_level = ? WHERE id = ?",
+                             (new_level, record["id"]))
+                conn.commit()
+            finally:
+                conn.close()
+            direction = "低" if ctype == "难度再低一点" else "高"
+            extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
+            extra.append(f"用户希望今晚建议的难度再{direction}一点（档位已从 {old_level} 调整为 {new_level}）")
+            advice = _run_and_save_today(user_id, username, record=record, extra_conditions=extra)
+            return {"advice": advice, "new_level": new_level}
+
+        # V3 B3：「换一种做法」＝一次性条件（参照难度微调的做法：不写入 conditions["纠正"]——
+        # 写入会让"换个做法"永久跟着每次重生成，方向漂移）。档位不变、不查封顶；
+        # 重生成结果照常全量过 enforce（danger/caution 下换出来的运动照样被撤）。
+        if ctype == "换一种做法":
+            conditions = json.loads(record["conditions_json"] or "{}")
+            extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
+            extra.append(_switch_plan_line(json.loads(record["advice_json"])))
+            advice = _run_and_save_today(user_id, username, record=dict(record),
+                                         extra_conditions=extra)
+            return {"advice": advice}
+
+        # 「其实我做了」＝昨晚的回执报错了：把昨天记录改成「完成了」，档位跟着重算（B7）
+        yesterday_updated = False
         record = dict(record)
+        if ctype == "其实我做了":
+            last = db.get_last_records_before(user_id, clock.today(), limit=1)
+            if last and last[0]["feedback"] != "完成了":
+                db.set_feedback(last[0]["id"], "完成了")
+                yesterday_updated = True
+                logger.info("user=%s 「其实我做了」：昨日(%s)回执改为完成了", username, last[0]["vday"])
+                new_level = _compute_today_baseline(user_id)
+                if new_level != record["baseline_level"]:
+                    conn = db.get_conn()
+                    try:
+                        conn.execute("UPDATE daily_records SET baseline_level = ? WHERE id = ?",
+                                     (new_level, record["id"]))
+                        conn.commit()
+                    finally:
+                        conn.close()
+                    record["baseline_level"] = new_level
+
         conditions = json.loads(record["conditions_json"] or "{}")
-        conditions["档位"] = new_level
-        record["baseline_level"] = new_level
+        corrections = conditions.get("纠正", [])
+        corrections.append(ctype)
+        conditions["纠正"] = corrections
+        conditions["档位"] = record["baseline_level"]
         record["conditions_json"] = json.dumps(conditions, ensure_ascii=False)
-        conn = db.get_conn()
-        try:
-            conn.execute("UPDATE daily_records SET baseline_level = ? WHERE id = ?",
-                         (new_level, record["id"]))
-            conn.commit()
-        finally:
-            conn.close()
-        direction = "低" if ctype == "难度再低一点" else "高"
-        extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
-        extra.append(f"用户希望今晚建议的难度再{direction}一点（档位已从 {old_level} 调整为 {new_level}）")
+        extra = [f"用户一击纠正：{c}" for c in corrections]
         advice = _run_and_save_today(user_id, username, record=record, extra_conditions=extra)
-        return {"advice": advice, "new_level": new_level}
-
-    # V3 B3：「换一种做法」＝一次性条件（参照难度微调的做法：不写入 conditions["纠正"]——
-    # 写入会让"换个做法"永久跟着每次重生成，方向漂移）。档位不变、不查封顶；
-    # 重生成结果照常全量过 enforce（danger/caution 下换出来的运动照样被撤）。
-    if ctype == "换一种做法":
-        conditions = json.loads(record["conditions_json"] or "{}")
-        extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
-        extra.append(_switch_plan_line(json.loads(record["advice_json"])))
-        advice = _run_and_save_today(user_id, username, record=dict(record),
-                                     extra_conditions=extra)
-        return {"advice": advice}
-
-    # 「其实我做了」＝昨晚的回执报错了：把昨天记录改成「完成了」，档位跟着重算（B7）
-    yesterday_updated = False
-    record = dict(record)
-    if ctype == "其实我做了":
-        last = db.get_last_records_before(user_id, clock.today(), limit=1)
-        if last and last[0]["feedback"] != "完成了":
-            db.set_feedback(last[0]["id"], "完成了")
-            yesterday_updated = True
-            logger.info("user=%s 「其实我做了」：昨日(%s)回执改为完成了", username, last[0]["vday"])
-            new_level = _compute_today_baseline(user_id)
-            if new_level != record["baseline_level"]:
-                conn = db.get_conn()
-                try:
-                    conn.execute("UPDATE daily_records SET baseline_level = ? WHERE id = ?",
-                                 (new_level, record["id"]))
-                    conn.commit()
-                finally:
-                    conn.close()
-                record["baseline_level"] = new_level
-
-    conditions = json.loads(record["conditions_json"] or "{}")
-    corrections = conditions.get("纠正", [])
-    corrections.append(ctype)
-    conditions["纠正"] = corrections
-    conditions["档位"] = record["baseline_level"]
-    record["conditions_json"] = json.dumps(conditions, ensure_ascii=False)
-    extra = [f"用户一击纠正：{c}" for c in corrections]
-    advice = _run_and_save_today(user_id, username, record=record, extra_conditions=extra)
-    return {"advice": advice, "yesterday_updated": yesterday_updated}
+        return {"advice": advice, "yesterday_updated": yesterday_updated}
 
 
 @app.post("/api/free_input")
-async def api_free_input(payload: dict, request: Request):
+def api_free_input(payload: dict, request: Request):
     """自由输入一句话：先存库；当天已有建议则重跑，否则轻确认（文档 3.2 / 第九节）。
     defer=True：即便当天已有建议也不重跑，只落库 + 抽三行，等下次真正触发生成时
     （判断页推进键 / 建议页「我要补充」）一并带走，不会被浪费。判断页的补充和 home
@@ -627,10 +637,15 @@ async def api_free_input(payload: dict, request: Request):
         return {"ok": True, "message": "记下了。晚上生成建议时会考虑进去。",
                 "applied": applied}
 
-    conditions = json.loads(record["conditions_json"] or "{}")
-    extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
-    extra.append("用户刚补充了一句话（见【今天已知】的自由输入），请把它纳入考虑")
-    advice = _run_and_save_today(user_id, username, record=record, extra_conditions=extra)
+    # 与 /api/offwork 同一把用户锁（同上面危险分支的做法）：锁内重取当日记录再生成，
+    # 防止和其它触发并发生成、拿着过期的 conditions 互相覆盖。此路径与危险分支互斥
+    # （那边所有分支都已 return），不会嵌套拿锁。
+    with _user_lock(user_id):
+        record = db.get_daily_record(user_id, clock.today()) or record
+        conditions = json.loads(record["conditions_json"] or "{}")
+        extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
+        extra.append("用户刚补充了一句话（见【今天已知】的自由输入），请把它纳入考虑")
+        advice = _run_and_save_today(user_id, username, record=record, extra_conditions=extra)
     if advice.get("agent_notes"):
         db.set_free_input_extracted(
             fid, json.dumps(advice["agent_notes"], ensure_ascii=False))
@@ -708,13 +723,15 @@ VISION_PROMPT = """识别图中食物，输出 JSON（不要输出其他内容�
 
 
 @app.post("/api/meal/photo")
-async def api_meal_photo(file: UploadFile, request: Request):
-    """上传食物照片 → 视觉模型转结构化记录存库 → 一句轻确认（不触发完整建议）。"""
+def api_meal_photo(file: UploadFile, request: Request):
+    """上传食物照片 → 视觉模型转结构化记录存库 → 一句轻确认（不触发完整建议）。
+    普通 def 同 /api/offwork：体内同步调视觉模型（单次 20s 超时），进线程池跑，
+    别让一张照片上传冻住整个事件循环。同步路由里用 file.file.read() 读上传内容。"""
     user_id = _current_user_id(request)
     if user_id is None:
         return JSONResponse(status_code=401, content={"error": "未登录"})
     username = db.get_username(user_id)
-    image_bytes = await file.read()
+    image_bytes = file.file.read()
     if not image_bytes:
         return JSONResponse(status_code=400, content={"error": "文件为空"})
 

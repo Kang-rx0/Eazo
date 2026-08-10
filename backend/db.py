@@ -100,9 +100,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 
 def get_conn() -> sqlite3.Connection:
-    """拿一个连接。row_factory 设成 Row，方便按列名取值。"""
-    conn = sqlite3.connect(config.DB_PATH)
+    """拿一个连接。row_factory 设成 Row，方便按列名取值。
+    timeout=30：并发写时等锁最多 30 秒，别直接抛 database is locked；
+    WAL：读写不互斥（带模型调用的路由改普通 def 进线程池后是真并发，默认 journal 模式会互相顶）。"""
+    conn = sqlite3.connect(config.DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
