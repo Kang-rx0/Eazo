@@ -142,7 +142,12 @@ def _gen_budget_ok() -> bool:
 
 
 def _fmt_advice(advice: dict) -> str:
-    lines = [f"判断：{advice.get('judgment', '')}"]
+    lines = []
+    judgement = advice.get("judgement") or advice.get("judgment")   # 真实键是 judgement
+    if judgement:
+        lines.append(f"判断：{judgement}")
+    if advice.get("reason"):
+        lines.append(f"理由：{advice['reason']}")
     for k in ("eat", "move", "stop"):
         v = advice.get(k)
         if isinstance(v, dict):
@@ -151,7 +156,7 @@ def _fmt_advice(advice: dict) -> str:
             lines.append(f"{ {'eat': '吃', 'move': '动', 'stop': '停'}[k] }：{v}")
     if advice.get("safety_level") and advice["safety_level"] != "none":
         lines.append(f"⚠ 安全等级：{advice['safety_level']}（运动类建议已按安全边界撤除/降级）")
-    return "\n".join(lines)
+    return "\n".join(lines) or "（建议内容为空）"
 
 
 # ---------- 工具实现（都返回给评测 agent 读的纯文本） ----------
