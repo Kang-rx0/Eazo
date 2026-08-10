@@ -108,7 +108,9 @@ def _fmt_profile(p) -> str:
         f"平时吃饭：{p['cooking']}",
         f"运动基础：{p['exercise_base']}",
     ]
-    if p["wake_time"]:
+    if p["sleep_time"] and p["wake_time"]:
+        parts.insert(2, f"平时 {p['sleep_time']} 睡、{p['wake_time']} 起")
+    elif p["wake_time"]:
         parts.insert(2, f"平时 {p['wake_time']} 起床")
     if p["diet_restrictions"]:
         parts.append(f"饮食禁忌（硬约束）：{p['diet_restrictions']}")
@@ -184,6 +186,14 @@ def build_confirm_hint(p, now, last_feedback: str | None, baseline_level: int) -
 
     remaining = int(max(0, (sleep_dt - max(now, eta_dt)).total_seconds() // 60))
 
+    # 依据文案：还没到下班点时，下班时间才是倒推的真正锚点，不带出来用户对不上账
+    off_work_end = p["off_work_end"]
+    still_at_work = bool(off_work_end) and now.strftime("%H:%M") <= off_work_end
+    if still_at_work:
+        time_basis = f"按 {off_work_end} 下班、{commute} 分钟通勤和 {sleep_point} 的睡点倒着算的"
+    else:
+        time_basis = f"按 {sleep_point} 的睡点和 {commute} 分钟通勤倒着算的"
+
     # 精力预估：昨晚回执差/没回音 或 今日档位≤1 → 很低；basis 只说真实发生过的事
     if last_feedback in ("完全没完成", "建议仍然太难"):
         energy, energy_basis = "很低", "昨晚那条没做完，今晚先按省力的来"
@@ -204,7 +214,7 @@ def build_confirm_hint(p, now, last_feedback: str | None, baseline_level: int) -
         "sleep_point": sleep_point,
         "home_eta": eta_str,
         "remaining_min": remaining,
-        "time_basis": f"按 {sleep_point} 的睡点和 {commute} 分钟通勤倒着算的",
+        "time_basis": time_basis,
         "energy_guess": energy,
         "energy_basis": energy_basis,
         "body": "暂未确认",

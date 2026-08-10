@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, clock, config, db, llm, safety
+from . import agent, clock, config, db, extract, llm, safety
 from .logging_setup import setup_logging
 
 setup_logging()
@@ -229,6 +229,16 @@ def _resolve_offwork_payload(payload: dict | None, remaining_min: int) -> tuple[
         return state, None
     return _map_calibration(calib, remaining_min)
 
+
+def _confirm_hint_for(user_id: int, profile) -> dict:
+    """按当前虚拟时间重算一次 s-confirm 的三行判断估算（纯代码，不写库不调模型）。
+    /api/offwork 折算校准、/api/free_input 抽取时间预算都要拿它当基准，口径必须一致。"""
+    last = db.get_last_records_before(user_id, clock.today(), limit=1)
+    last_fb = last[0]["feedback"] if last else None
+    return agent.build_confirm_hint(profile, clock.now(), last_fb,
+                                    _compute_today_baseline(user_id))
+
+
 # 每用户一把锁：防止双击「下班了」并发生成两条当日记录（B9）
 _offwork_locks: dict[int, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -262,22 +272,29 @@ def _compute_today_baseline(user_id: int) -> int:
 def _run_and_save_today(user_id: int, username: str, record=None,
                         extra_conditions: list[str] | None = None,
                         offwork_state: str | None = None,
-                        calibration_conditions: dict | None = None) -> dict:
+                        calibration_conditions: dict | None = None,
+                        safety_state: dict | None = None) -> dict:
     """跑 Agent 并写库。record 为 None 时新建当日记录，否则更新（纠正/自由输入重跑）。
     offwork_state：「下班了」时的状态自述（今晚更累/时间更少/不太舒服/今天还行），
     存进 conditions 后当天所有重生成都会带着它（上下文注入 + 安全扫描）。
     calibration_conditions（V3 B2）：_map_calibration 的产物（"校准"原样 +
-    派生的"剩余分钟"/"校准补充行"），同样存 conditions、重生成继续带着。"""
+    派生的"剩余分钟"/"校准补充行"），同样存 conditions、重生成继续带着。
+    safety_state：调用方刚跑过 safety.assess 时可以直接传进来复用（free_input 的
+    即时安全闸门），省掉一次 L2 分类器调用；不传就照旧在下面自己算。"""
     if record is None:
         level = _compute_today_baseline(user_id)
         conditions = {"来源": "offwork", "档位": level, "纠正": []}
-        if offwork_state:
-            conditions["下班状态"] = offwork_state
-        if calibration_conditions:
-            conditions.update(calibration_conditions)
     else:
         level = record["baseline_level"] if record["baseline_level"] is not None else 3
         conditions = json.loads(record["conditions_json"] or "{}")
+    # 状态自述/校准对新建和重算一视同仁：已定态的判断页带着改过的三行回来重算时
+    # （/api/offwork 的 replan），必须传 record=已有记录才不会插出第二条当日记录，
+    # 而这两项如果只在新建分支里并，新校准就会被静默丢掉——用户在判断页明明改了、
+    # 建议里却没体现，比不让他改更糟。都并进来，后写的覆盖先写的（最新一次为准）。
+    if offwork_state:
+        conditions["下班状态"] = offwork_state
+    if calibration_conditions:
+        conditions.update(calibration_conditions)
     state_line = (f"用户下班时自述状态：{conditions['下班状态']}"
                   if conditions.get("下班状态") else None)
     if state_line:
@@ -285,7 +302,9 @@ def _run_and_save_today(user_id: int, username: str, record=None,
     # V3 B2：校准派生注入行——与下班状态行同构（存 conditions、每次重生成都带），
     # 但不进安全扫描 texts（与"难度再高一点不进扫描"同一设计：非健康自述不扫）
     calib_lines = []
-    if conditions.get("剩余分钟"):
+    # 用 is not None 而不是真值判断：剩余 0 分钟（"十点半才下班"、睡点已经到了）是最紧的
+    # 那种情况，恰恰最需要注入，不能因为 0 是假值就被悄悄跳过
+    if conditions.get("剩余分钟") is not None:
         calib_lines.append(f"用户说今晚只剩约 {conditions['剩余分钟']} 分钟，几点停按它收紧")
     if conditions.get("校准补充行"):
         calib_lines.append(conditions["校准补充行"])
@@ -298,11 +317,12 @@ def _run_and_save_today(user_id: int, username: str, record=None,
     if conditions.get("下班状态"):
         texts.append(conditions["下班状态"])   # "不太舒服"这类状态自述也要过安全检测
     profile = db.get_profile(user_id)
-    safety_state = safety.assess(
-        texts,
-        health_note=profile["health_note"] if profile else None,
-        chronic_condition=profile["chronic_condition"] if profile else None,
-    )
+    if safety_state is None:
+        safety_state = safety.assess(
+            texts,
+            health_note=profile["health_note"] if profile else None,
+            chronic_condition=profile["chronic_condition"] if profile else None,
+        )
     if safety_state["final_level"] != "none" or safety_state["hits"]:
         conditions["安全"] = {"level": safety_state["final_level"],
                               "命中": safety_state["hits"], "L2": safety_state["l2"]}
@@ -364,13 +384,20 @@ async def api_offwork(request: Request, payload: dict | None = None):
 
     # 双击/并发防护：同一用户的「下班了」串行执行（B9）
     with _user_lock(user_id):
-        # 当天已有建议 → 直接返回（界面回到建议卡片；双击的第二次会走到这）
         existing = db.get_daily_record(user_id, today)
-        if existing and existing["advice_json"]:
+        has_advice = bool(existing and existing["advice_json"])
+        # replan：判断页在已定态按「按改后的重新安排」——用户明确要求带着这一屏改过的
+        # 三行 + 暂存的补充重来一次。只有前端在已定态、且确实有未提交变更时才会带这个键，
+        # 所以「双击第二次」「从 home 兜底进来」这些没带 replan 的调用行为完全不变。
+        replan = bool((payload or {}).get("replan")) and has_advice
+        # 当天已有建议且没要求重来 → 直接返回（界面回到建议卡片；双击的第二次会走到这）
+        if has_advice and not replan:
             return {"advice": json.loads(existing["advice_json"]), "already_generated": True}
 
-        # 昨日及更早的未回执：只对最近一天弹回执，更早的标「未响应」（沉默也是数据）
-        pending = db.get_pending_records_before(user_id, today)
+        # 昨日及更早的未回执：只对最近一天弹回执，更早的标「未响应」（沉默也是数据）。
+        # replan 时跳过：今晚的建议早就生成过了，昨日回执在那时就已经收完，这里再弹一次
+        # 只会把人从「我改了三行等着看新安排」拽去答昨天的题。
+        pending = [] if replan else db.get_pending_records_before(user_id, today)
         if pending:
             latest = pending[-1]
             for old in pending[:-1]:
@@ -388,15 +415,15 @@ async def api_offwork(request: Request, payload: dict | None = None):
         # V3 B2：解析 state / calibration（state 优先）。remaining_min 只在带校准时才需要估算
         remaining_min = 0
         if isinstance((payload or {}).get("calibration"), dict):
-            last = db.get_last_records_before(user_id, today, limit=1)
-            last_fb = last[0]["feedback"] if last else None
-            hint = agent.build_confirm_hint(profile, clock.now(), last_fb,
-                                            _compute_today_baseline(user_id))
-            remaining_min = hint["remaining_min"]
+            remaining_min = _confirm_hint_for(user_id, profile)["remaining_min"]
         state, calib_conditions = _resolve_offwork_payload(payload, remaining_min)
-        logger.info("user=%s event=offwork 触发建议生成 状态自述=%s 校准=%s",
-                    username, state, calib_conditions)
-        advice = _run_and_save_today(user_id, username, offwork_state=state,
+        logger.info("user=%s event=offwork 触发建议生成 replan=%s 状态自述=%s 校准=%s",
+                    username, replan, state, calib_conditions)
+        # replan 必须带上已有记录：不带的话 _run_and_save_today 会走新建分支、
+        # 给同一天插出第二条 daily_record（历史/档位推算全乱）。
+        advice = _run_and_save_today(user_id, username,
+                                     record=existing if replan else None,
+                                     offwork_state=state,
                                      calibration_conditions=calib_conditions)
         return {"advice": advice}
 
@@ -539,7 +566,12 @@ async def api_correct(payload: dict, request: Request):
 
 @app.post("/api/free_input")
 async def api_free_input(payload: dict, request: Request):
-    """自由输入一句话：先存库；当天已有建议则重跑，否则轻确认（文档 3.2 / 第九节）。"""
+    """自由输入一句话：先存库；当天已有建议则重跑，否则轻确认（文档 3.2 / 第九节）。
+    defer=True：即便当天已有建议也不重跑，只落库 + 抽三行，等下次真正触发生成时
+    （判断页推进键 / 建议页「我要补充」）一并带走，不会被浪费。判断页的补充和 home
+    树洞都常驻传这个——判断页「补充/改一下只暂存、黄键才推进」不该因今晚生成过一次
+    就反转；树洞更直接不是「对着建议说话」的入口，要改计划永远走判断页。只有建议页
+    「我要补充」不带 defer：那是冲着改当前这份安排去的，该立刻重算。"""
     user_id = _current_user_id(request)
     if user_id is None:
         return JSONResponse(status_code=401, content={"error": "未登录"})
@@ -550,12 +582,50 @@ async def api_free_input(payload: dict, request: Request):
     if p is not None and p["severe_flag"]:
         return {"rejected": True, "message": safety.SEVERE_NOTICE}
     username = db.get_username(user_id)
+    defer = bool(payload.get("defer"))
     fid = db.insert_free_input(user_id, clock.today(), clock.now().strftime("%H:%M"), text)
-    logger.info("user=%s event=free_input text=%s", username, text[:50])
+    logger.info("user=%s event=free_input defer=%s text=%s", username, defer, text[:50])
 
     record = db.get_daily_record(user_id, clock.today())
-    if record is None or not record["advice_json"]:
-        return {"ok": True, "message": "记下了。晚上生成建议时会考虑进去。"}
+    if record is None or not record["advice_json"] or defer:
+        # 当天还没建议（或判断页明确要求暂存）：句子先落库，等用户按推进键时统一进生成。
+        # 但危险信号不能等——V3 判断页改成「补充先只暂存」之后，这里补一道即时安全闸门：
+        # 立刻把当天全部自由输入过一遍 L1 词表 + L2 分类器，命中 danger/crisis 就当场
+        # 走一次完整生成（等价于用户已经按下推进键），落库后 /api/state 自然转 safety_exit，
+        # 硬退出、灰阶、trace 全部沿用既有链路，前端零判断。
+        gate = safety.assess(
+            db.get_free_inputs(user_id, clock.today()),
+            health_note=p["health_note"] if p is not None else None,
+            chronic_condition=p["chronic_condition"] if p is not None else None,
+        ) if p is not None else {"final_level": "none", "hits": []}
+        if gate["final_level"] in ("danger", "crisis"):
+            logger.warning("user=%s event=free_input 即时安全闸门命中 level=%s hits=%s",
+                           username, gate["final_level"], gate["hits"])
+            # 与 /api/offwork 共用同一把用户锁：防止和「就按这个安排」并发生成两条当日记录
+            with _user_lock(user_id):
+                existing = db.get_daily_record(user_id, clock.today())
+                ex_advice = (json.loads(existing["advice_json"])
+                             if existing and existing["advice_json"] else None)
+                # 已经是安全模式建议 → 并发/重复触发，原样返回即可（幂等）。
+                if ex_advice and ex_advice.get("safety_level") in ("danger", "crisis"):
+                    return {"advice": ex_advice, "safety_exit": True}
+                # 已有的是普通建议（defer 让"已定态在判断页说了危险的话"这条路变得可达）：
+                # 必须就地重算成安全模式。原样把旧建议返回是不行的——它的 safety_level 还是
+                # none，/api/state 会照旧判 view=advice，前端拿着 safety_exit 也退不出去，
+                # 人就留在普通建议屏上了。安全永远赢。
+                advice = _run_and_save_today(user_id, username,
+                                             record=existing if ex_advice else None,
+                                             safety_state=gate)
+            return {"advice": advice, "safety_exit": True}
+        # 不危险：抽一次「时间/精力/身体」，把这句话里明确说到的项写回判断页那三行。
+        # 只暂存不代表屏上可以写假话——用户说了"胃不舒服"，身体那行还挂着"暂未确认"
+        # 就是在骗人。抽不出来（词表没中且模型不可用）就只留在「你补充的」列表里。
+        applied = {}
+        if p is not None:
+            applied = extract.extract(text, _confirm_hint_for(user_id, p),
+                                      p["commute_min"] or 0)
+        return {"ok": True, "message": "记下了。晚上生成建议时会考虑进去。",
+                "applied": applied}
 
     conditions = json.loads(record["conditions_json"] or "{}")
     extra = [f"用户一击纠正：{c}" for c in conditions.get("纠正", [])]
@@ -719,6 +789,38 @@ async def api_meal_delete(payload: dict, request: Request):
             logger.warning("删除图片文件失败：%s", row["image_path"])
     logger.info("user_id=%s event=meal_delete meal_id=%s", user_id, meal_id)
     return {"ok": True, "message": "已删除这条饮食记录"}
+
+
+@app.post("/api/meal/update")
+async def api_meal_update(payload: dict, request: Request):
+    """更正一条饮食记录：识别错了但用户知道自己吃的是什么，直接用原话覆盖，不重跑视觉模型。"""
+    user_id = _current_user_id(request)
+    if user_id is None:
+        return JSONResponse(status_code=401, content={"error": "未登录"})
+    meal_id = payload.get("meal_id") or -1
+    text = (payload.get("text") or "").strip()
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "写一下你吃的是什么"})
+    db_conn = db.get_conn()
+    try:
+        row = db_conn.execute(
+            "SELECT * FROM meal_records WHERE id = ? AND user_id = ?", (meal_id, user_id)
+        ).fetchone()
+        if row is None:
+            return JSONResponse(status_code=400, content={"error": "记录不存在"})
+        food = json.loads(row["food_json"]) if row["food_json"] else {}
+        food["名称"] = text
+        food["recognized"] = True
+        food["备注"] = "用户更正"
+        db_conn.execute(
+            "UPDATE meal_records SET food_json = ? WHERE id = ?",
+            (json.dumps(food, ensure_ascii=False), meal_id),
+        )
+        db_conn.commit()
+    finally:
+        db_conn.close()
+    logger.info("user_id=%s event=meal_update meal_id=%s", user_id, meal_id)
+    return {"ok": True, "message": f"改成了：{text}。晚上按这个参考。"}
 
 
 # ---------- 虚拟时钟（文档第八节） ----------
