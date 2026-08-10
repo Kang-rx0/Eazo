@@ -10,11 +10,12 @@ import time
 
 import re
 
-from fastapi import FastAPI, Request, UploadFile
+from fastapi import FastAPI, Request, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, clock, config, db, extract, llm, safety
+from . import agent, clock, config, db, extract, llm, mcp_server, safety
 from .logging_setup import setup_logging
 
 setup_logging()
@@ -981,6 +982,47 @@ async def api_state(request: Request):
         "virtual_now_display": clock.now_display(),
         "vday": clock.today(),
     }
+
+
+# ---------- 赛事自建 MCP（Streamable HTTP，协议与工具实现见 mcp_server.py） ----------
+
+def _mcp_process(payload):
+    """单条或批量 JSON-RPC → 响应体（None = 全是通知，回 202 空体）。在线程池里跑。"""
+    if isinstance(payload, list):
+        replies = [r for r in (mcp_server.handle_message(m) for m in payload) if r is not None]
+        return replies or None
+    return mcp_server.handle_message(payload)
+
+
+@app.post("/mcp")
+async def api_mcp(request: Request):
+    """MCP 端点：JSON-RPC over POST。async 只负责收 body（裸 JSON-RPC 不能用
+    payload:dict|list 注解——FastAPI 对 Union 体走 embed 模式会 422）；真正的处理
+    经 run_in_threadpool 进线程池（tools/call 里有同步模型调用，不能占事件循环）。
+    通知（无 id）按规范回 202 空体；GET/DELETE /mcp 未注册，FastAPI 自动 405。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={
+            "jsonrpc": "2.0", "id": None,
+            "error": {"code": -32700, "message": "Parse error"}})
+    reply = await run_in_threadpool(_mcp_process, payload)
+    if reply is None:
+        return Response(status_code=202)
+    return JSONResponse(reply)
+
+
+@app.get("/mcp")
+@app.delete("/mcp")
+async def api_mcp_not_allowed():
+    """Streamable HTTP 的可选能力（GET=服务端推送流、DELETE=会话终止）本服务不支持，
+    按规范回 405。必须显式注册：不注册的话根路径的静态托管 mount 会把 GET /mcp
+    吃成 404 静态文件。"""
+    return Response(status_code=405, headers={"Allow": "POST"})
+
+
+# 静态托管前端（放在所有 API 路由之后，"/" 直接出 index.html）
+app.mount("/", StaticFiles(directory=config.FRONTEND_DIR, html=True), name="frontend")
 
 
 # 静态托管前端（放在所有 API 路由之后，"/" 直接出 index.html）
