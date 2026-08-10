@@ -843,6 +843,29 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
 }
 .clockbar button:hover{color:var(--text); border-color:var(--line-2)}
 
+/* 时钟条说明气泡（首次进 Home）：观感同 .toast，但可交互、锚在时钟条上沿，带下指箭头 */
+.clocktip{
+  position:absolute; z-index:30; left:20px; right:20px;
+  bottom:calc(46px + env(safe-area-inset-bottom));
+  padding:12px 15px 10px; border-radius:12px;
+  background:var(--ink-3); color:var(--text);
+  border:1.5px solid var(--line-2);
+  font-size:13.5px; line-height:1.5;
+}
+.clocktip::after{
+  content:""; position:absolute; left:50%; bottom:-7px;
+  width:12px; height:12px; transform:translateX(-50%) rotate(45deg);
+  background:var(--ink-3);
+  border-right:1.5px solid var(--line-2); border-bottom:1.5px solid var(--line-2);
+}
+.clocktip p{margin:0}
+.clocktip b{font-weight:600}
+.clocktip button{
+  display:block; margin:8px 0 0 auto; padding:4px 2px;
+  background:none; border:0; cursor:pointer;
+  color:var(--amber); font-size:13px; font-weight:600;
+}
+
 /* ---------- 焦点 ---------- */
 :focus-visible{outline:3px solid var(--mint); outline-offset:2px; border-radius:6px}
 :focus:not(:focus-visible){outline:none}

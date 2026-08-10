@@ -495,16 +495,22 @@
 
   </main>
 
-  <!-- 虚拟时钟控制条（②-25）：演示道具，常驻 -->
+  <!-- 虚拟时钟控制条（②-25）：演示道具，常驻。只留跨节点档位（±1h/±1d）——
+       拨钟是为了跨过下班点/睡点/新一天，±10m 跨不过任何节点，删（2026-08-10 冲刺收敛） -->
   <div class="clockbar" id="clockBar">
     <b id="clockDisplay">加载中…</b>
     <button type="button" data-clock='{"advance_days":-1}'>−1d</button>
     <button type="button" data-clock='{"advance_hours":-1}'>−1h</button>
-    <button type="button" data-clock='{"advance_minutes":-10}'>−10m</button>
-    <button type="button" data-clock='{"advance_minutes":10}'>+10m</button>
     <button type="button" data-clock='{"advance_hours":1}'>+1h</button>
     <button type="button" data-clock='{"advance_days":1}'>+1d</button>
     <button type="button" data-clock='{"reset":true}'>重置</button>
+  </div>
+
+  <!-- 首次进 Home 的时钟条说明气泡：讲清这是演示道具、怎么用它把完整循环试出来。
+       只在 home 屏出现（show() 里按屏名切换）；「知道了」或第一次真用拨钟后永久收起 -->
+  <div class="clocktip" id="clockTip" hidden>
+    <p>底下这条是<b>虚拟时钟</b>，演示道具：拨 +1h / +1d 跳到今晚下班后、甚至第二天，不用干等，就能把「下班 → 建议 → 回执 → 次日调整」完整试一遍。</p>
+    <button type="button" id="clockTipOk">知道了</button>
   </div>
 
   <!-- 抽屉：我要补充 / 改一下（共用遮罩） -->
@@ -759,6 +765,10 @@
       if (name === 'confirm') applyConfirmState();
       if (name === 'home') renderHomeCta();
       if (name === 'basicinfo') renderBasicInfo();
+      // 时钟条说明气泡：只在 home 屏出现，换屏自动收（boot 遮罩下路过的 home 也被
+      // 随后真正落定的屏纠正掉，不会漏到 confirm 等屏上）；看过一次就不再出。
+      document.getElementById('clockTip').hidden =
+        !(name === 'home' && !localStorage.getItem('clockTipSeen'));
 
       document.querySelectorAll('.screen').forEach(s =>
         s.id === 's-' + name ? s.setAttribute('data-active', '') : s.removeAttribute('data-active'));
@@ -2000,8 +2010,15 @@
     });
 
     /* ---------- 时钟条 + 30s 轮询（②-25 / ③-3） ---------- */
+    // 说明气泡的收起：「知道了」或第一次真用拨钟（用过 = 已经懂了），永久不再出
+    function dismissClockTip() {
+      localStorage.setItem('clockTipSeen', '1');
+      document.getElementById('clockTip').hidden = true;
+    }
+    document.getElementById('clockTipOk').addEventListener('click', dismissClockTip);
     document.querySelectorAll('[data-clock]').forEach(btn =>
       btn.addEventListener('click', async () => {
+        dismissClockTip();
         await fetch('/api/clock', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
