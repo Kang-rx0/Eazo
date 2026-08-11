@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     diet_restrictions TEXT,    -- 饮食禁忌，逗号分隔，可空
     health_note       TEXT,    -- 健康问题一行，可空
     wake_time         TEXT,    -- 平时起床时间，"几点停"倒推睡眠时长用
+    sleep_time        TEXT,    -- 平时就寝时间，与 wake_time 配对采集展示（②-11 补齐）；
+                               -- "几点停"仍按 wake_time 固定倒推 7.5h，本字段暂只作参考上下文
     exercise_base     TEXT DEFAULT '无/偶尔',  -- 运动基础
     gender            TEXT,    -- 计算参数，全部可跳过
     age               INTEGER,
@@ -98,9 +100,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 
 def get_conn() -> sqlite3.Connection:
-    """拿一个连接。row_factory 设成 Row，方便按列名取值。"""
-    conn = sqlite3.connect(config.DB_PATH)
+    """拿一个连接。row_factory 设成 Row，方便按列名取值。
+    timeout=30：并发写时等锁最多 30 秒，别直接抛 database is locked；
+    WAL：读写不互斥（带模型调用的路由改普通 def 进线程池后是真并发，默认 journal 模式会互相顶）。"""
+    conn = sqlite3.connect(config.DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -110,7 +115,7 @@ PROFILE_FIELDS = [
     "work_body_state", "cooking", "diet_restrictions", "health_note",
     "wake_time", "exercise_base", "gender", "age", "height_cm", "weight_kg",
     "chronic_condition", "doctor_advice",   # V2：severe_flag 不在白名单——由后端派生，前端改不了
-    "favorite_foods",
+    "favorite_foods", "sleep_time",
 ]
 
 
@@ -126,7 +131,8 @@ def init_db() -> None:
             logger.info("db 迁移：profiles 表补充 wake_time 列")
         # V2 安全边界（S4）：结构化病况 / 医嘱 / 严重疾病劝退标记
         for col, ddl in (("chronic_condition", "TEXT"), ("doctor_advice", "TEXT"),
-                         ("severe_flag", "INTEGER DEFAULT 0"), ("favorite_foods", "TEXT")):
+                         ("severe_flag", "INTEGER DEFAULT 0"), ("favorite_foods", "TEXT"),
+                         ("sleep_time", "TEXT")):
             if col not in cols:
                 conn.execute(f"ALTER TABLE profiles ADD COLUMN {col} {ddl}")
                 logger.info("db 迁移：profiles 表补充 %s 列", col)

@@ -4,12 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Lite Me</title>
-  <link rel="stylesheet" href="nightwatch.css">
+  <link rel="stylesheet" href="nightwatch.css?v=rowsrc-align-1">
   <!-- 主题预设：在样式应用前尽早读取，避免开屏先暗后亮的闪烁 -->
   <script>if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-preload-light','1');</script>
   <style>
     /* 预载亮色：body 未就绪前先把 html 背景垫成亮色，消除闪烁 */
     html[data-preload-light]{background:#F4F1EA}
+    /* 启动遮罩：开屏 refreshState/startNight 期间可能连续 show() 好几屏（home→confirm 等），
+       中间那些屏不该被看到——盖住 topbar+screens，等启动流程定屏后再一次性揭开。
+       .screen 本身也要一起冻结：否则中途 show() 到的屏（如 home）会在遮罩下悄悄跑完
+       opacity 过渡，等揭幕那一刻它可能还没退回 0，露出几十毫秒的残影 */
+    body[data-boot] .topbar, body[data-boot] .screens, body[data-boot] .screen{opacity:0!important; visibility:hidden!important; transition:none!important}
     /* 本页专属的少量补充：提醒条卡片 + 回执快捷行 + 安全渲染基础位（P5 收口视觉） */
     .remindbar{
       margin:16px 0 0; padding:13px 15px;
@@ -30,6 +35,11 @@
     .docline{margin:12px 0 0; font-size:14.5px; line-height:1.6; font-weight:600}
     .bandlabel span{white-space:nowrap}
     .bandlabel span:last-child{text-align:right}
+    /* 判断页「你补充的」：标签沿用判断行标签列的字号/字重/色（13px / 400 / 次要色），
+       列表直接复用 .meallog（Home 已在用的同一条「HH:MM 你说：XX」样式）。零新增 token。 */
+    #confirmNotes{margin:18px 0 0}
+    #confirmNotes>p{margin:0; font-size:13px; line-height:1.25; font-weight:400; color:var(--muted)}
+    #confirmNotes .meallog{margin-top:9px}
     .homepanel .textlink{min-height:36px; padding:6px 8px}
     /* 「怎么想的」= 合并进来的 trace 列表，套在 .srcs 的 dd 里 */
     #advTraceRow dd ul{margin:0; padding-left:16px; list-style:disc}
@@ -69,7 +79,7 @@
     .clockbar button{padding:4px 7px}
   </style>
 </head>
-<body>
+<body data-boot>
   <header class="topbar">
     <button class="navicon back" type="button" id="navBack" aria-label="返回" hidden>
       <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -132,17 +142,23 @@
               <button class="textlink" type="button" data-free-send>说给它</button>
             </div>
           </div>
+          <!-- 食记（③-15 单张）：拍照提示 + 识别回执 + 更正输入合为一个气泡，按状态切换内容，
+               不再另开一个面板叠在下面（反馈：两个框并列不对，回执该显示在同一个框里）。 -->
           <div class="homepanel" hidden data-panel-name="meal">
-            <p class="note">拍下今天吃的，晚餐建议更贴近你</p>
-            <button class="textlink" type="button" data-photo-pick>添加照片</button>
-            <input type="file" accept="image/*" data-photo-input hidden>
-          </div>
-          <!-- 拍照回执独立一行：确认句 + 「记错了？删除」（③-15 单张） -->
-          <div class="homepanel" hidden data-panel-name="receipt">
-            <p class="note" data-photo-msg style="margin:8px 0 0;padding:0;border:0"></p>
-            <div class="inline-row" data-receipt-actions style="gap:16px;margin-top:2px">
-              <button class="textlink" type="button" data-receipt-dismiss>知道了</button>
-              <button class="textlink" type="button" data-photo-delete>记错了？删除</button>
+            <div class="mealtop">
+              <p class="note" data-meal-note>拍下今天吃的，晚餐建议更贴近你</p>
+              <button class="textlink" type="button" data-photo-pick>添加照片</button>
+              <input type="file" accept="image/*" data-photo-input hidden>
+            </div>
+            <div class="inline-row" data-receipt-actions hidden>
+              <button class="textlink" type="button" data-receipt-dismiss>没错</button>
+              <button class="textlink" type="button" data-meal-correct>更正</button>
+              <button class="textlink" type="button" data-photo-delete>删除</button>
+            </div>
+            <div class="inline-row" data-correct-row hidden>
+              <textarea class="field" data-correct-text rows="1" placeholder="比如：其实是牛肉面"
+                        aria-label="更正这顿吃的"></textarea>
+              <button class="textlink" type="button" data-correct-send>改好了</button>
             </div>
           </div>
           <div class="homegrid">
@@ -162,7 +178,9 @@
         <!-- 饮食记录常驻列表：上传后在 home 留一条「HH:MM 记了一条饮食：XX」，
              让用户看得见传成功了（不只是转瞬即逝的回执）。由 refreshState 按 today_meals 渲染。 -->
         <ul class="meallog" id="mealLog" hidden></ul>
-        <p class="voice">今晚，留一件小事给自己。</p>
+        <div class="voice-slot">
+          <p class="voice">今晚，留一件小事给自己。</p>
+        </div>
       </div>
       <div class="foot">
         <button class="btn primary" type="button" id="startBtn">开始今晚</button>
@@ -178,13 +196,13 @@
         <h1 id="confirmTitle">先对一下<br>今晚的判断</h1>
 
         <dl class="rows">
-          <div class="row"><dt>剩余时间</dt><dd><span id="chTime">--</span><i>估</i></dd></div>
+          <div class="row"><dt>剩余时间</dt><dd><span id="chTime">--</span><i id="chTimeEst">估</i></dd></div>
           <div class="rowsrc">
             <p id="chTimeBasis"></p>
             <button class="textlink" type="button" data-adjust>改一下</button>
           </div>
 
-          <div class="row"><dt>当前精力</dt><dd><span id="chEnergy">--</span><i>估</i></dd></div>
+          <div class="row"><dt>当前精力</dt><dd><span id="chEnergy">--</span><i id="chEnergyEst">估</i></dd></div>
           <div class="rowsrc">
             <p id="chEnergyBasis"></p>
             <button class="textlink" type="button" data-adjust>改一下</button>
@@ -192,16 +210,28 @@
 
           <div class="row"><dt>身体状况</dt><dd><span id="chBody">暂未确认</span></dd></div>
           <div class="rowsrc">
-            <p>这项我判断不了，按你说的算</p>
+            <p id="chBodyBasis">这项我判断不了，按你说的算</p>
             <button class="textlink" type="button" data-adjust>改一下</button>
           </div>
         </dl>
-        <!-- Q1：今晚建议已生成时，三处「改一下」置灰 + 这一行提示（不做后端强制重算） -->
-        <p class="note" id="confirmLocked" hidden>今晚已生成，要改走「我要补充」。</p>
+        <!-- 「你补充的」：判断页是所有补充/调整的暂存台——「我要补充」说过的话立刻列在这，
+             不再提交完就跳走。数据源同 Home 的 today_notes（后端已落库），跨天自动清空。 -->
+        <div id="confirmNotes" hidden>
+          <p>你补充的</p>
+          <ul class="meallog" id="confirmNotesLog"></ul>
+        </div>
+        <!-- 已定态（今晚已生成、还没按「就这样」）替换掉 confirmVoice 的那一行提示。
+             文案由 applyConfirmState 按"有没有未提交的变更"填两种，别在这里写死：
+             这一行和黄键文案是同一件事的两处表述，写死会跟按钮打架。 -->
+        <p class="note" id="confirmLocked" hidden></p>
         <p class="voice" id="confirmVoice">都是我估的，不对就改。</p>
       </div>
       <div class="foot">
-        <button class="btn primary" type="button" id="confirmOk">判断大致没错</button>
+        <!-- 判断页的唯一推进出口（V3 定稿）：「我要补充」「改一下」一律只回写这一屏，
+             不管今晚生成过没有，都不会偷偷往前跳——只有这颗键会。
+             未定态文案固定是「就按这个安排」（「这个」指代整屏当前状态）；已定态由
+             applyConfirmState 换成「看今晚的安排」/「按改后的重新安排」，见那里的注释。 -->
+        <button class="btn primary" type="button" id="confirmOk">就按这个安排</button>
         <!-- 「身体不舒服」与「我要补充」本是同一条 /api/free_input 管道，合并为一个入口：
              不舒服也在「我要补充」里说一句即可（home 屏保留独立的身体不舒服快捷）。 -->
         <button class="btn ghost" type="button" data-note-open>我要补充</button>
@@ -267,9 +297,9 @@
       </div>
     </section>
 
-    <!-- ========== 锁定屏「今晚已定」（第 7.2 条 + Q2）：接受之后的死胡同。
-         无返回、无齿轮、无 foot 按钮（时钟条保留，演示需要）；
-         但保留树洞 + 食记两个入口——树洞说一句会重算，锁定屏上的建议行同步刷新；
+    <!-- ========== 锁定屏「今晚已定」（第 7.2 条 + Q2 修订）：接受之后的展示屏。
+         无齿轮、无 foot 按钮（时钟条保留，演示需要）；
+         左上角返回箭头可回建议页改计划（Q2 修订：不再是死胡同，见 反馈修改计划.md）；
          若安全升级到 danger/crisis 则整屏退出锁定态转 sober 卡（安全永远赢过锁定）。
          接受状态不落库（维持 ①-8）：localStorage 记 accepted_vday，凌晨 4 点后失效 ========== -->
     <section class="screen" id="s-accepted">
@@ -286,19 +316,22 @@
           <li id="lockStop" data-key hidden><b></b><span></span></li>
         </ol>
         <!-- 「今晚已定」＝用户唯一要参与的决定已完成：树洞/食记/「有变化随时说一句」是
-             Home 的补充输入层，不再占据已定页；只留一个低调的回首页出口（要补充就回 Home）。 -->
+             Home 的补充输入层，不再占据已定页；想改计划走左上角返回，要补充就回 Home。 -->
         <button class="textlink" type="button" id="acceptedHome" style="display:block;margin:22px auto 0;opacity:.6">回首页</button>
       </div>
     </section>
 
     <!-- ========== 鼓励屏（第 7.2 条，Q6 定稿文案，纯代码固定、不调模型）：
-         睡点弹窗点「好」之后进来。无返回、无按钮，只有时钟条 ========== -->
+         睡点弹窗点「好」之后进来。无返回箭头、无 foot 按钮，只有时钟条；
+         但和 s-accepted 一样补一个低调回首页出口——纯提醒页也不该是零交互死胡同，
+         用户想提前离开不必等凌晨 4 点自动重置（2026-08 反馈修正，原「无返回、无按钮」已不再适用）。 -->
     <section class="screen" id="s-done">
       <div class="body">
         <p class="clock" id="doneClock">--:--</p>
         <p class="tag">今晚结束</p>
         <h1>今晚这一件<br>你做到了</h1>
         <p class="voice">不用回我。睡吧，明天见。</p>
+        <button class="textlink" type="button" id="doneHome" style="display:block;margin:22px auto 0;opacity:.6">回首页</button>
       </div>
     </section>
 
@@ -351,25 +384,10 @@
       <div class="body">
         <h1>设置</h1>
         <p class="setgroup">关于你</p>
-        <!-- 每个字段一个精确入口（sec 直达对应那一屏），改完即返回，不必一屏屏往下走（问题1） -->
+        <!-- 6 个字段收进「基本情况」二级屏，主屏只留一个入口（问题1 的「精确入口」在二级屏内保留，不必一屏屏往下走） -->
         <ul class="setlist">
-          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-1'">
-            <span class="lab"><b>上下班时间</b><s>倒推今晚还剩多少时间</s></span><span class="chev">›</span>
-          </button></li>
-          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-2'">
-            <span class="lab"><b>工作日身体</b><s>久坐还是走动，累在哪</s></span><span class="chev">›</span>
-          </button></li>
-          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-3'">
-            <span class="lab"><b>平时怎么吃饭</b><s>三餐主要靠什么解决</s></span><span class="chev">›</span>
-          </button></li>
-          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-4'">
-            <span class="lab"><b>要绕开的</b><s>饮食禁忌与过敏</s></span><span class="chev">›</span>
-          </button></li>
-          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-5'">
-            <span class="lab"><b>起床时间</b><s>用来倒推今晚几点该停</s></span><span class="chev">›</span>
-          </button></li>
-          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=pref'">
-            <span class="lab"><b>常吃的东西</b><s>顺着爱好给最轻的改法</s></span><span class="chev">›</span>
+          <li><button class="setrow" type="button" id="basicInfoEntry">
+            <span class="lab"><b>基本情况</b><s>作息、通勤、饮食、身体边界</s></span><span class="chev">›</span>
           </button></li>
         </ul>
         <p class="setgroup">找你的时间</p>
@@ -410,6 +428,48 @@
       </div>
     </section>
 
+    <!-- ========== 基本情况（设置 → 关于你 的二级屏）：每个字段一个精确入口（sec 直达对应那一屏），
+         改完即返回，不必一屏屏往下走（问题1）。分组 + 当前值列参考老原型「关于你」的分类
+         （nightwatch-v0.2.html #s-set-profile），把原来平铺的 6 行按「作息与口味」「身体参考」
+         「安全相关」分层；值列内容在 renderBasicInfo() 里从 profile 现算，不在 HTML 里写死。 ========== -->
+    <section class="screen" id="s-basicinfo">
+      <div class="body">
+        <h1>基本情况</h1>
+        <ul class="setlist">
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-1'">
+            <span class="lab"><b>上下班时间</b><s>倒推今晚还剩多少时间</s></span><span class="val" id="biWork"></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-2'">
+            <span class="lab"><b>工作日身体</b><s>久坐还是走动，累在哪</s></span><span class="val" id="biBody"></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-3'">
+            <span class="lab"><b>平时怎么吃饭</b><s>三餐主要靠什么解决</s></span><span class="val" id="biCook"></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=pref'">
+            <span class="lab"><b>常吃的东西</b><s>顺着爱好给最轻的改法</s></span><span class="val" id="biFav"></span><span class="chev">›</span>
+          </button></li>
+        </ul>
+        <p class="setgroup">身体参考</p>
+        <ul class="setlist">
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-5'">
+            <span class="lab"><b>睡觉起床时间</b><s>算你的睡眠时长</s></span><span class="val" id="biSleep"></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-5'">
+            <span class="lab"><b>运动基础</b><s>平时动得多不多</s></span><span class="val" id="biExercise"></span><span class="chev">›</span>
+          </button></li>
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-5'">
+            <span class="lab"><b>年龄、身高体重</b><s>可选，帮我把建议调得更稳</s></span><span class="val" id="biParam"></span><span class="chev">›</span>
+          </button></li>
+        </ul>
+        <p class="setgroup">安全相关</p>
+        <ul class="setlist">
+          <li><button class="setrow" type="button" onclick="location.href='onboarding.html?edit=1&sec=ob-4'">
+            <span class="lab"><b>要绕开的</b><s>忌口、慢病</s></span><span class="val" id="biSafe"></span><span class="chev">›</span>
+          </button></li>
+        </ul>
+      </div>
+    </section>
+
     <!-- ========== 历史回看（B4 /api/history）：不显示做没做到、不显示连续天数 ========== -->
     <section class="screen" id="s-history">
       <div class="body">
@@ -435,23 +495,30 @@
 
   </main>
 
-  <!-- 虚拟时钟控制条（②-25）：演示道具，常驻 -->
+  <!-- 虚拟时钟控制条（②-25）：演示道具，常驻。只留跨节点档位（±1h/±1d）——
+       拨钟是为了跨过下班点/睡点/新一天，±10m 跨不过任何节点，删（2026-08-10 冲刺收敛） -->
   <div class="clockbar" id="clockBar">
     <b id="clockDisplay">加载中…</b>
     <button type="button" data-clock='{"advance_days":-1}'>−1d</button>
     <button type="button" data-clock='{"advance_hours":-1}'>−1h</button>
-    <button type="button" data-clock='{"advance_minutes":-10}'>−10m</button>
-    <button type="button" data-clock='{"advance_minutes":10}'>+10m</button>
     <button type="button" data-clock='{"advance_hours":1}'>+1h</button>
     <button type="button" data-clock='{"advance_days":1}'>+1d</button>
     <button type="button" data-clock='{"reset":true}'>重置</button>
+  </div>
+
+  <!-- 首次进 Home 的时钟条说明气泡：讲清这是演示道具、怎么用它把完整循环试出来。
+       只在 home 屏出现（show() 里按屏名切换）；「知道了」或第一次真用拨钟后永久收起 -->
+  <div class="clocktip" id="clockTip" hidden>
+    <p>底下这条是<b>虚拟时钟</b>，演示道具：拨 +1h / +1d 跳到今晚下班后、甚至第二天，不用干等，就能把「下班 → 建议 → 回执 → 次日调整」完整试一遍。</p>
+    <button type="button" id="clockTipOk">知道了</button>
   </div>
 
   <!-- 抽屉：我要补充 / 改一下（共用遮罩） -->
   <div class="calibration-scrim" id="sheetScrim" hidden></div>
   <section class="calibration-sheet" id="noteSheet" role="dialog" aria-modal="true" hidden>
     <h2>我要补充</h2>
-    <p>说一句，我按今晚的新情况重新安排。</p>
+    <!-- 副标题与主按钮按屏切换（见 [data-note-open] 处）：判断页只暂存、建议页才重算 -->
+    <p id="noteSheetDesc">说一句，我按今晚的新情况重新安排。</p>
     <div class="calgroup">
       <p>补充一句</p>
       <div class="inline-row">
@@ -473,7 +540,9 @@
 
   <section class="calibration-sheet" id="adjustSheet" role="dialog" aria-modal="true" hidden>
     <h2>改一下</h2>
-    <p>这几项不对就改，我按新的重新算。</p>
+    <!-- V3 定稿：改完不再当场重算，只回写判断页那三行；副标题必须先把这件事说清楚，
+         否则用户会以为按下去就出建议了 -->
+    <p>这几项不对就改，改完回判断页看一眼。</p>
     <div class="calgroup">
       <p>今晚还剩多久</p>
       <div class="wheel calibration-time-wheel"><div class="wheeltrack" id="calTimeWheel" role="listbox" tabindex="0" aria-label="今晚剩余时间"></div></div>
@@ -492,8 +561,13 @@
         <button class="chip" type="button" data-cal="body" data-val="没有明显不适">没有明显不适</button>
         <button class="chip" type="button" data-cal="body" data-val="有明显不适">有明显不适</button>
       </div>
+      <!-- 只在选中「有明显不适」时展开，句子随 calSave 一并进 /api/free_input，
+           走既有的三层安全检测（②-6 同一条规则），不在这里加任何词表判断 -->
+      <textarea class="field" id="calBodyNote" rows="2" hidden
+                placeholder="比如：头有点晕 / 胃不太舒服 / 嗓子疼"
+                aria-label="具体哪里不舒服" style="margin-top:9px"></textarea>
     </div>
-    <button class="btn primary" type="button" id="calSave">按这个重新算</button>
+    <button class="btn primary" type="button" id="calSave">按这个记下</button>
   </section>
 
   <!-- 身体不舒服（第 6 条）：说一句 → /api/free_input 存句子 → 生成/重算。
@@ -534,8 +608,64 @@
     let lastState = null;        // /api/state 最近一次返回（唯一时间与视图源，③-3）
     let currentAdvice = null;
     let profile = null;          // 提醒条 + 时间带用（commute/off_work_end）
-    let pendingCalibration;      // 回执优先时暂存的校准（B2 牵连 5）
     let pendingOffworkPayload;   // 回执答完后继续生成用
+    /* 判断页草稿（V3 定稿：判断页是暂存台，不是中转站）。
+       两条路都往这里写——「改一下」的结构化三项，以及「我要补充」说的一句话被后端
+       抽出来的那几项（applied）——都只攒在这里，不落库、不生成、不切屏，只回写判断页
+       那三行；直到用户按下唯一的推进出口「就按这个安排」，才作为 calibration 交给
+       /api/offwork。只放明确说到/改过的项：没动过的行继续显示后端 confirm_hint 的
+       估算值和「估」徽标。
+       每项配一个同名 *_note：值是从话里抽出来的时才有，用来在依据行原样回显那些原话
+       （「你说：胃不舒服」）。手动改的没有 note，依据行说「你刚改的，按这个算」——
+       推断来的和手选的必须能分辨，否则用户没法判断这个值是不是自己的意思。
+       *_note 是【数组】，因为一晚可以为同一个结论说好几句：「感冒」再「头痛」，两句都
+       指向"有明显不适"。只留最后一句的话，这行就办不成它自己的事——它存在的唯一理由是
+       让用户校验我们理解对没有，只报一句，用户没法确认前一句有没有被听进去（后端那侧
+       从来不丢，当天全部原话都进 Agent 上下文，但屏上看不出来，人就只能来问）。 */
+    let confirmDraft = null;     // {time_budget_min?, time_note?: string[], energy?, energy_note?, body?, body_note?}
+    /* confirmDraft 与 confirmDirty 是两件事，别合并：
+       confirmDraft ＝「用户对今晚三行的当前主张」，是显示状态，只在跨天作废。
+         提交后不能清——清了三行会回落到 confirm_hint 的系统估算，用户明明说了"很低"、
+         建议也是按"很低"生成的，退回判断页却又显示"还行【估】"，这一屏就在撒谎。
+       confirmDirty ＝「这些主张里还有没交给 Agent 的」，交出去就清。
+         黄键的文案和行为看的是它：没有未提交的东西，已定态那颗键就只是「看今晚的安排」。
+       只看 draftEmpty() 不够——「我要补充」说的"刚吃完火锅"抽不出那三行里的任何一项，
+       草稿仍是空的，但它确实是一笔还没交出去的变更，得靠这个标志才推得出去。 */
+    let confirmDirty = false;
+    const DRAFT_KEYS = ['time_budget_min', 'energy', 'body'];
+    const draftEmpty = () => !confirmDraft || !DRAFT_KEYS.some(k => confirmDraft[k] != null);
+    const noteKey = k => k === 'time_budget_min' ? 'time_note' : k + '_note';
+    // *_note 一律按数组读（历史/异常写成字符串也兜住），依据行和抽屉回显共用这一个口径
+    const noteList = v => Array.isArray(v) ? v : (v ? [v] : []);
+    const NOTE_SHOW = 3;         // 依据行最多列几句原话，多的折成「等 N 条」（全文在「你补充的」里）
+    /* 把后端抽出来的 applied 并进草稿。
+       值：后说的覆盖先说的（用户最新一句话最接近当下）。
+       原话：值没变就【追加】，值变了就【重置】——
+         「感冒」再「头痛」，两句都抽出"有明显不适"，是同一个结论的两条证据，都得留；
+         「胃不舒服」后来说「好多了」，值翻成"没有明显不适"，这时候依据行还挂着"胃不
+         舒服"就是拿一句已经不成立的话给新结论背书，旧话必须作废。
+       这条规则把"谁新谁旧"的判断收敛成了"值变没变"，不需要额外的时序逻辑。
+       applied 里没有的键一律不动——那是"这句话没说到这项"，不是"这项要清空"。
+       skip 里的键也不动：那是用户刚在「改一下」里亲手选过的，手选必须压过我们从
+       附言里抽出来的推断，否则用户选了「还行」却因为附言里有个"累"被改成「很低」。 */
+    function mergeApplied(applied, text, skip) {
+      if (!applied || !Object.keys(applied).length) return false;
+      confirmDraft = confirmDraft || {};
+      let hit = false;
+      DRAFT_KEYS.forEach(k => {
+        if (applied[k] == null || (skip && skip.includes(k))) return;
+        const nk = noteKey(k);
+        const same = confirmDraft[k] === applied[k];
+        const prev = same ? noteList(confirmDraft[nk]) : [];
+        // 同一句话说两遍（重复提交、抽屉回显原样再存）不该在依据行里出现两次
+        const dup = prev.includes(text);
+        if (!same || !dup) hit = true;
+        confirmDraft[k] = applied[k];
+        confirmDraft[nk] = dup ? prev : prev.concat(text);
+      });
+      return hit;
+    }
+
     let recallRecordId = null;
     let lastMealId = null;       // 最近一张食记的 id（回执删除/跨天重置用）
     let _loadingBtn = null;      // 生成进行态占用的按钮（结束时恢复原文案）
@@ -550,22 +680,59 @@
       clearTimeout(toastTimer);
       if (!sticky) toastTimer = setTimeout(() => el.removeAttribute('data-show'), 3600);
     }
-    function hideToast() { document.getElementById('toast').removeAttribute('data-show'); }
+    function hideToast() { clearTimeout(toastTimer); document.getElementById('toast').removeAttribute('data-show'); }
 
-    function setLoading(on) {
+    // 就地通知：反馈写回触发它的那个按钮本身（同 setLoading/confirmRecall 的思路），
+    // 不再借用悬浮在固定像素带上的全局 toast——那条带子不管当前屏 .foot 里有几个按钮
+    // 都悬在同一个位置，会截断凑巧落在那个区间里的按钮（反馈）。el 传空时退化回
+    // toast()，给没有明确锚点的调用点用，行为不变。
+    let noticeTimer = null;
+    let _noticeEl = null;
+    let _noticeText = '';
+    function notice(el, msg) {
+      if (!el) { toast(msg); return; }
+      clearTimeout(noticeTimer);
+      if (_noticeEl && _noticeEl !== el) restoreNotice();
+      if (!_noticeEl) { _noticeEl = el; _noticeText = el.textContent; }
+      el.textContent = msg;
+      el.setAttribute('data-notice', '');
+      el.disabled = true;
+      noticeTimer = setTimeout(restoreNotice, 3600);
+    }
+    function restoreNotice() {
+      if (!_noticeEl) return;
+      _noticeEl.textContent = _noticeText;
+      _noticeEl.removeAttribute('data-notice');
+      _noticeEl.disabled = false;
+      _noticeEl = null; _noticeText = '';
+    }
+
+    function setLoading(on, anchorBtn, busyText) {
       // 生成进行态直接占用「当前屏主按钮」本身（文案变「正在想…」），不再浮一个框盖在按钮上方。
       // 安全出口也一并禁用：生成中再点只多一次无效往返（后端有锁，但别诱导双击）。
+      // anchorBtn 传入时（我要补充/改一下等不推进的附加动作）：进行态只占用触发它的那个
+      // 按钮本身，不去动屏幕主按钮（就按这个安排/就这样）——那是另一个动作，不该被这次
+      // 请求借用文案、也不该被顺手禁用变灰（反馈：黄键不该因为一句附加话就变了样）。
       const foot = document.querySelector(`#s-${activeScreen} .foot`);
-      const primary = foot && foot.querySelector('.btn.primary');
-      document.querySelectorAll('.foot .btn.primary, .foot .safety').forEach(b => b.disabled = on);
+      const primary = anchorBtn || (foot && foot.querySelector('.btn.primary'));
+      if (anchorBtn) primary.disabled = on;
+      else document.querySelectorAll('.foot .btn.primary, .foot .safety').forEach(b => b.disabled = on);
       if (on) {
+        // 例外：开始今晚的按钮通知（doOffwork 的 need_feedback 分支）可能还没到时，
+        // 用户就已经在回顾卡上作答、二次触发了生成——占用按钮前先把它收掉，不然通知
+        // 自己的恢复计时器之后会把这里刚写的"正在想…"或生成完的文案再抢回去。
+        if (_noticeEl === primary) restoreNotice();
+        // 进行态文案的唯一判据是「这次请求会不会跑 Agent」，不是「按的是哪颗键」——
+        // 等一秒和等十几秒是两件事，说错了用户会以为自己按错了。默认按锚点猜（判断页上
+        // 的补充/改一下都只落库），会重算的调用方自己传 busyText 覆盖。
+        const loadingText = busyText || (anchorBtn ? '正在记，稍等…' : '正在想今晚怎么安排…');
         if (primary) {
           _loadingBtn = primary;
           _loadingBtnText = primary.textContent;
-          primary.textContent = '正在想今晚怎么安排，大约十几秒…';
+          primary.textContent = loadingText;
           primary.setAttribute('aria-busy', 'true');
         } else {
-          toast('正在想今晚怎么安排，大约十几秒…', true);   // 没有主按钮的屏（兜底）
+          toast(loadingText, true);   // 没有主按钮的屏（兜底）
         }
       } else {
         if (_loadingBtn) {
@@ -584,21 +751,31 @@
     }
 
     /* ---------- 多屏骨架：返回箭头/齿轮按屏配置（齿轮只挂 Home） ---------- */
-    // 返回链（第 2 条）：advice→confirm 新增；accepted/bye/rejected/done 是死胡同，不给返回
-    const BACK_TO = { 'confirm': 'home', 'advice': 'confirm', 'settings': 'home',
-                      'history': 'settings', 'about': 'settings' };
+    // 返回链（第 2 条 + Q2 修订）：advice→confirm、accepted→advice；bye/rejected/done 仍是死胡同
+    // accepted 原本是死胡同（Q2 拍板），后改为允许返回改计划：见 反馈修改计划.md Q2 修订说明
+    const BACK_TO = { 'accepted': 'advice', 'confirm': 'home', 'advice': 'confirm', 'settings': 'home',
+                      'basicinfo': 'settings', 'history': 'settings', 'about': 'settings' };
     let activeScreen = 'home';
     function show(name) {
       activeScreen = name;
-      if (name === 'confirm') applyConfirmLock();
+      // 换屏就把上一屏还没到时的提示收掉：toast 是脱离 .screen 结构的全局浮层，
+      // 不会跟着旧屏一起隐藏——不清的话会跨屏残留到设定时长结束才消失（反馈）。
+      hideToast();
+      restoreNotice();
+      if (name === 'confirm') applyConfirmState();
       if (name === 'home') renderHomeCta();
+      if (name === 'basicinfo') renderBasicInfo();
+      // 时钟条说明气泡：只在 home 屏出现，换屏自动收（boot 遮罩下路过的 home 也被
+      // 随后真正落定的屏纠正掉，不会漏到 confirm 等屏上）；看过一次就不再出。
+      document.getElementById('clockTip').hidden =
+        !(name === 'home' && !localStorage.getItem('clockTipSeen'));
 
       document.querySelectorAll('.screen').forEach(s =>
         s.id === 's-' + name ? s.setAttribute('data-active', '') : s.removeAttribute('data-active'));
       document.getElementById('navBack').hidden = !(name in BACK_TO);
-      // 头像入口常驻在非核心屏；建议流程(confirm/advice)与锁定/死胡同屏(accepted/done/bye/rejected)
-      // 不放分心入口——这些屏本就无返回、要么正在决策、要么已收尾。
-      const AVATAR_SHOWN = new Set(['home', 'settings', 'history', 'about']);
+      // 头像入口常驻在非核心屏；建议流程(confirm/advice/accepted)与死胡同屏(done/bye/rejected)
+      // 不放分心入口——这些屏要么正在决策/改计划，要么已收尾。
+      const AVATAR_SHOWN = new Set(['home', 'settings', 'basicinfo', 'history', 'about']);
       document.getElementById('navGear').hidden = !AVATAR_SHOWN.has(name);
       const body = document.querySelector(`#s-${name} .body`);
       if (body) body.scrollTop = 0;
@@ -610,12 +787,57 @@
       const btn = document.getElementById('startBtn');
       btn.textContent = locked ? '查看今晚建议' : '开始今晚';
     }
-    /* Q1：今晚建议已生成 → confirm 屏三处「改一下」置灰 + 提示行，改走「我要补充」 */
-    function applyConfirmLock() {
-      const locked = !!currentAdvice;
-      document.querySelectorAll('#s-confirm [data-adjust]').forEach(b => { b.disabled = locked; b.hidden = locked; });
-      document.getElementById('confirmLocked').hidden = !locked;
-      document.getElementById('confirmVoice').hidden = locked;
+    /* 基本情况：把 profile 摊平成每行的当前值（分组 + 值列，参考老原型 renderSettings 的做法）。
+       只读展示，不做兜底修正——缺的字段就显示「没填」，交给对应的 onboarding 分步去补。 */
+    function renderBasicInfo() {
+      if (!profile) return;
+      const setVal = (id, text) => { document.getElementById(id).textContent = text || '没填'; };
+      const join = (parts, sep) => parts.filter(Boolean).join(sep);
+
+      setVal('biWork', profile.off_work_start && profile.off_work_end
+        ? `${profile.off_work_start}–${profile.off_work_end} · 通勤 ${profile.commute_min ?? 30} 分`
+        : '');
+      setVal('biBody', profile.work_body_state);
+      setVal('biCook', profile.cooking);
+      setVal('biFav', (profile.favorite_foods || '').split(',').filter(Boolean).join('、') || '还没勾');
+
+      setVal('biSleep', profile.sleep_time && profile.wake_time
+        ? `${profile.sleep_time}–${profile.wake_time}` : '');
+      setVal('biExercise', profile.exercise_base);
+      setVal('biParam', join([
+        profile.age != null ? `${profile.age}岁` : '',
+        profile.height_cm != null ? `${profile.height_cm}cm` : '',
+        profile.weight_kg != null ? `${profile.weight_kg}kg` : '',
+      ], ' · '));
+
+      setVal('biSafe', join([
+        (profile.diet_restrictions || '').split(',').filter(Boolean).join('、'),
+        profile.chronic_condition || '',
+      ], '；'));
+    }
+    /* 判断页的两种形态。规则在两种形态下完全一致——「改一下」「我要补充」永远只回写这一屏，
+       黄键永远是唯一的推进出口——变的只有黄键指向哪儿、以及顶上那句话怎么说。
+       已定态（今晚已生成、还没按「就这样」）唯一的入口是建议页左上角的返回箭头，用户
+       从那儿回来只有三种意思：看看凭什么、判断错了要改、补个信息但不想现在重来。三种都
+       靠这一屏就地满足，改完攒着，按一次黄键一次算完——不再每改一次就在后台偷跑一遍 Agent。 */
+    function applyConfirmState() {
+      const settled = !!currentAdvice;
+      /* 「还有没交出去的变更」只能问 confirmDirty，不能问 draftEmpty()。草稿是故意跨越
+         提交活下来的（见 doOffwork 的注释），所以按完黄键回到这一屏时草稿仍然是满的——
+         拿 draftEmpty() 判就会对着已经算进去的改动说"还没算进去"，顺便让黄键再空跑一遍
+         十几秒的 Agent。交出去过就是交出去过，这一位由提交那一刻清。 */
+      const pending = settled && confirmDirty;
+      document.getElementById('confirmLocked').hidden = !settled;
+      document.getElementById('confirmVoice').hidden = settled;
+      // 已定态不再禁用「改一下」：草稿现在有出口了（黄键会带着它重算），没有理由再逼用户
+      // 改用自然语言去说一件有滚轮可选的事——那比不让他改还绕。
+      document.getElementById('confirmLocked').textContent = pending
+        ? '改的还没算进去，按下面那颗键我重新安排。'
+        : '今晚已经安排好了，这儿改完按下面那颗键，我重新安排。';
+      // 黄键文案必须说真话：没有未提交的变更时它只是过去看结果，不该顶着「就按这个安排」
+      // 假装自己交了什么（后端那一侧本来就会原样返回旧建议，是一次纯空跑）。
+      document.getElementById('confirmOk').textContent =
+        !settled ? '就按这个安排' : pending ? '按改后的重新安排' : '看今晚的安排';
     }
     document.getElementById('navBack').addEventListener('click', () => {
       const target = BACK_TO[activeScreen] || 'home';
@@ -644,8 +866,17 @@
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
     document.querySelectorAll('[data-note-open]').forEach(b =>
       b.addEventListener('click', () => {
-        // 快捷区只在已有建议时出现（没建议时纠正类接口会 400）
-        document.getElementById('noteActionsGroup').hidden = !currentAdvice;
+        // 同一张抽屉两种语义：判断页＝只记下（留在这一屏），建议页＝提交并重算。
+        // 文案必须跟着变，否则"提交并重新安排"会承诺一件判断页上不会发生的事。
+        const onConfirm = activeScreen === 'confirm';
+        // 快捷区只在建议页且已有建议时出现（没建议时纠正类接口会 400）。判断页永远不显示——
+        // 哪怕建议已生成、currentAdvice 还留着上次的值：纠正走 /api/correct 会 refreshState 跳屏，
+        // 违反判断页「我要补充只回写这一屏，绝不偷偷往前跳」的规则（见 confirmOk 按钮旁注释）。
+        document.getElementById('noteActionsGroup').hidden = onConfirm || !currentAdvice;
+        document.getElementById('noteSheetDesc').textContent = onConfirm
+          ? '说一句，我先记进今晚的判断里。'
+          : '说一句，我按今晚的新情况重新安排。';
+        document.getElementById('noteSubmit').textContent = onConfirm ? '先记下' : '提交并重新安排';
         openSheet('noteSheet');
       }));
 
@@ -660,6 +891,14 @@
 
     /* ---------- 时间显示 ---------- */
     function hm(iso) { const d = new Date(iso); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+    // 时长展示统一按小时+分钟折算（与 onboarding.html 的 renderWorkLen/renderSleepLen 同一套写法），
+    // 不再把 60 分以上的时长原样拍成「240 分钟」。
+    function fmtDuration(mins) {
+      mins = Math.max(0, Math.round(mins));
+      const h = Math.floor(mins / 60), m = mins % 60;
+      if (h === 0) return `${m} 分钟`;
+      return m ? `${h} 小时 ${m} 分` : `${h} 小时`;
+    }
     function greetingFor(iso) {
       const h = new Date(iso).getHours();
       if (h < 5) return '夜深了';
@@ -738,6 +977,7 @@
       const prevVday = lastState && lastState.vday;
       const crossDay = !!prevVday && state.vday !== prevVday;
       const stay = !!(opts && opts.keepScreen) && !crossDay;
+      if (crossDay) { confirmDraft = null; confirmDirty = false; }   // 换天：昨晚攒的判断页草稿一律作废
       lastState = state;
       if (state.view === 'onboarding') { location.href = 'onboarding.html'; return; }
       paintClocks(state);
@@ -760,10 +1000,10 @@
       renderYesterdayLine(state.yesterday_feedback);
       renderRecall(state);
       // 食记回执随「当天」生命周期：后端 today_meals 只含当天记录，跨天自动为空。
-      // 空则收起回执面板（含 lastMealId），避免昨天那条「记下了 XX」赖在主页/锁定屏。
+      // 空则把气泡收回拍照提示态（含 lastMealId 清空），避免昨天那条「记下了 XX」赖在主页/锁定屏。
       if (!state.today_meals || state.today_meals.length === 0) {
         lastMealId = null;
-        document.querySelectorAll('[data-panel-name="receipt"]').forEach(p => p.hidden = true);
+        document.querySelectorAll('[data-tools]').forEach(resetMealPanel);
       }
       renderMealLog(state);   // home 常驻饮食记录列表
       renderNotes(state);     // home 常驻补充内容列表
@@ -785,11 +1025,21 @@
       // 但当前正停在 bye 屏则别打断（刚点完今天不做）。
       const declined = declinedValid(state) && !locked;
       const wantAdvice = state.view === 'advice' && !declined;
+      // 首夜（onboarding 刚完成）：不经过 home，直接落确认屏。confirm_hint 已在本次 state 里，
+      // renderConfirm 就地渲染即可——省掉「先 show('home') 再由 startNight 二次拉 state 跳 confirm」造成的 home 闪现。
+      // 仅在常规态（无锁定屏/未不做）接管；安全路由（rejected/safety_exit）已在上面 return。
+      const firstNight = !!(opts && opts.firstNight) && !nightScreen && !declined;
       if (!stay) {
-        if (declined && activeScreen === 'bye') { /* 停在 bye，不跳 */ }
+        if (firstNight && renderConfirm()) show('confirm');
+        else if (declined && activeScreen === 'bye') { /* 停在 bye，不跳 */ }
         else show(nightScreen || (wantAdvice ? 'advice' : 'home'));
       }
-      else if (nightScreen && activeScreen !== nightScreen) show(nightScreen);
+      // 只在「已经站在锁定屏体系里」时才跟着 accepted/done 互跳（真的发生的事：
+      // 睡点到了）。锁定态生效时人也可能正站在 advice/confirm/home——那是 Q2 修订后
+      // 开放的回退链主动走过去的，不是这条状态失配（否则「我要补充」「拨钟」这类
+      // keepScreen 动作会把人从判断页/建议页硬拽回锁定屏，noteBtn() 也会因 activeScreen
+      // 被强改而找错屏，见 D 批次回退链路 bug）。
+      else if (nightScreen && (activeScreen === 'accepted' || activeScreen === 'done') && activeScreen !== nightScreen) show(nightScreen);
       else if (!nightScreen && (activeScreen === 'accepted' || activeScreen === 'done')) show('home');
       else if (activeScreen === 'advice' && state.view !== 'advice') show('home');   // 建议没了，这屏不成立
       else if (activeScreen === 'confirm') renderConfirm();   // 三行判断跟着新时间重算
@@ -874,6 +1124,19 @@
       document.getElementById('recallCard').hidden = false;
       show('home');
     }
+    /* 回执确认就地显示在回顾卡里（复用卡片本身的「已完成」样式：虚线框+居中小字，
+       隐藏选项/次要按钮），停留一小会儿再让卡片消失——确认信息永远跟点的那张卡绑在一起，
+       不再借用页面底部的全局 toast（会跟同屏的「开始今晚」等按钮撞在一起，见反馈）。 */
+    function confirmRecall(fb) {
+      const card = document.getElementById('recallCard');
+      document.getElementById('recallQuestion').textContent = `已记下：${fb}`;
+      card.setAttribute('data-done', '');
+      return new Promise(resolve => setTimeout(() => {
+        card.hidden = true;
+        card.removeAttribute('data-done');
+        resolve();
+      }, 1200));
+    }
     document.querySelectorAll('[data-fb]').forEach(btn =>
       btn.addEventListener('click', async () => {
         const fb = btn.getAttribute('data-fb');
@@ -881,7 +1144,7 @@
         const data = await api('/api/feedback', { record_id: recallRecordId, feedback: fb });
         setLoading(false);
         if (!data || data.error) { toast((data && data.error) || '提交失败，再试一次'); return; }
-        document.getElementById('recallCard').hidden = true;
+        await confirmRecall(fb);
         if (yesterdayFb && yesterdayFb.record_id === recallRecordId) yesterdayFb.feedback = fb;
         renderYesterdayLine(yesterdayFb || { record_id: recallRecordId, feedback: fb, advice: null });
         if (data.advice) {
@@ -894,15 +1157,11 @@
           // 修 bug：跨天后 currentAdvice 可能还留着昨晚那份，只看它非空会误跳；
           // 必须以后端当天 view 为准——第二天只答昨晚回执时 view=home，应停在 Home。
           show('advice');
-          toast(`已记下：${fb}`);
         } else if (pendingOffworkPayload !== undefined) {
           // 首次回执：答完继续生成（校准值此前暂存，B2 牵连 5）
-          toast(`已记下：${fb}`);
           const payload = pendingOffworkPayload;
           pendingOffworkPayload = undefined;
           await doOffwork(payload);
-        } else {
-          toast(`已记下：${fb}`);
         }
       }));
 
@@ -943,19 +1202,91 @@
       document.getElementById('remindBar').hidden = true;
     });
 
-    /* ---------- 开始今晚 → s-confirm（③-7）：三行判断全部来自 confirm_hint ---------- */
+    /* Home 中段留空（用户反馈）：remindBar 和 recallCard 都不在时，把 voice 从底部
+       抽到 h1 与树洞/食记之间居中，填掉"问候大字之后一大截空白"；两条一旦任一出现，
+       自动让位回原位（见 nightwatch.css #s-home.mid-empty）。两个元素的 hidden
+       分散赋值在好几处（checkReminder 内部四条分支、remindYes/remindNo、renderRecall、
+       openRecall、confirmRecall 的延时回调），逐处手动同步容易漏，用 MutationObserver
+       统一盯 hidden 属性变化。 */
+    function syncHomeMidEmpty() {
+      const bar = document.getElementById('remindBar');
+      const card = document.getElementById('recallCard');
+      document.getElementById('s-home').classList.toggle('mid-empty', bar.hidden && card.hidden);
+    }
+    new MutationObserver(syncHomeMidEmpty)
+      .observe(document.getElementById('remindBar'), { attributes: true, attributeFilter: ['hidden'] });
+    new MutationObserver(syncHomeMidEmpty)
+      .observe(document.getElementById('recallCard'), { attributes: true, attributeFilter: ['hidden'] });
+    syncHomeMidEmpty();
+
+    /* ---------- 开始今晚 → s-confirm（③-7）：三行判断 = 后端 confirm_hint 叠上用户草稿 ----------
+       改过的行做三件事：换成用户给的值、摘掉「估」徽标（已经不是估的了）、
+       依据行改成「你刚改的」——让"我刚才那一下生效了"在屏幕上看得见，而不是靠跳屏证明。 */
     function renderConfirm() {
       const h = lastState && lastState.confirm_hint;
       if (!h) return false;
-      document.getElementById('chTime').textContent =
-        h.remaining_min > 0 ? `约 ${h.remaining_min} 分钟` : '不多了';
-      document.getElementById('chTimeBasis').textContent = h.time_basis;
-      document.getElementById('chEnergy').textContent = h.energy_guess;
-      document.getElementById('chEnergyBasis').textContent = h.energy_basis;
-      document.getElementById('chBody').textContent = h.body;
+      const d = confirmDraft || {};
+      /* 三行的依据行统一这么读：值是从用户说的话里抽出来的，就把那些原话回显
+         （「你说：感冒、头痛」）；是在「改一下」里手选的，就说「你刚改的」。
+         回显原话而不是复述我们抽出的结论，用户才看得出来抽歪没有、要不要再改一下——
+         所以说过几句就要列几句，只报最后一句等于没给他校验前面那句的机会。
+         超过 NOTE_SHOW 句折成「等 N 条」：这行是小号灰字，不能长到把值挤下去，而全文
+         就在同屏下面的「你补充的」列表里，折了也追得回去。 */
+      const why = notes => {
+        const list = noteList(notes);
+        if (!list.length) return '你刚改的，按这个算';
+        const shown = list.slice(-NOTE_SHOW);       // 留最近的几句：越新越贴近此刻
+        return `你说：${shown.join('、')}` +
+          (list.length > shown.length ? ` 等 ${list.length} 条` : '');
+      };
+      const setRow = (valId, estId, basisId, changed, value, basis) => {
+        document.getElementById(valId).textContent = value;
+        const est = estId && document.getElementById(estId);
+        if (est) est.hidden = changed;
+        document.getElementById(basisId).textContent = basis;
+      };
+      // 剩余时间
+      const mins = d.time_budget_min != null ? d.time_budget_min : h.remaining_min;
+      setRow('chTime', 'chTimeEst', 'chTimeBasis', d.time_budget_min != null,
+        mins > 0 ? `约 ${fmtDuration(mins)}` : '不多了',
+        d.time_budget_min != null ? why(d.time_note) : h.time_basis);
+      // 当前精力
+      setRow('chEnergy', 'chEnergyEst', 'chEnergyBasis', !!d.energy,
+        d.energy || h.energy_guess,
+        d.energy ? why(d.energy_note) : h.energy_basis);
+      // 身体状况：后端永远给不出判断（h.body 恒为"暂未确认"），所以这行本来就没有「估」徽标
+      setRow('chBody', null, 'chBodyBasis', !!d.body,
+        d.body || h.body,
+        d.body ? why(d.body_note) : '这项我判断不了，按你说的算');
       document.getElementById('confirmTitle').innerHTML =
-        h.energy_guess === '很低' ? '今晚先按<br>省力的来' : '先对一下<br>今晚的判断';
+        (d.energy || h.energy_guess) === '很低' ? '今晚先按<br>省力的来' : '先对一下<br>今晚的判断';
+      // 改过任意一项，「都是我估的」那句就不再成立
+      document.getElementById('confirmVoice').textContent =
+        draftEmpty() ? '都是我估的，不对就改。' : '按你说的改好了，还有要补的就说。';
+      renderConfirmNotes(lastState);
+      applyConfirmState();
       return true;
+    }
+
+    /* 判断页「你补充的」：和 Home 的常驻列表同一份数据（today_notes）、同一套 .meallog 样式。
+       补充说过的话留在这一屏上，是"补充不推进"这条新规则唯一能让用户信的证据。 */
+    function renderConfirmNotes(state) {
+      const box = document.getElementById('confirmNotes');
+      const log = document.getElementById('confirmNotesLog');
+      if (!box || !log) return;
+      const notes = (state && state.today_notes) || [];
+      if (!notes.length) { box.hidden = true; log.innerHTML = ''; return; }
+      log.innerHTML = '';
+      notes.forEach(n => {
+        const li = document.createElement('li');
+        const t = document.createElement('b');
+        t.textContent = n.vtime;   // 后端已存 HH:MM
+        const s = document.createElement('span');
+        s.textContent = ` 你说：${n.text}`;
+        li.append(t, s);
+        log.appendChild(li);
+      });
+      box.hidden = false;
     }
     async function startNight() {
       // 今晚已定：从 home 点「查看今晚建议」直接回已定页，不重走确认/生成。
@@ -964,7 +1295,7 @@
         if (a) { renderLock(a); show(nightDone(lastState) ? 'done' : 'accepted'); return; }
       }
       // 今晚已「不做」：默认收工，不从 home 复活今晚流程（问题3）。反悔走 s-bye 上的隐蔽入口「还是做吧」。
-      if (declinedValid(lastState)) { toast('今晚先这样，明天见'); return; }
+      if (declinedValid(lastState)) { notice(document.getElementById('startBtn'), '今晚先这样，明天见'); return; }
       // 只有后端确认今天已有建议时才直接回建议屏；否则跨天残留的昨晚 currentAdvice 会误跳
       if (currentAdvice && lastState && lastState.view === 'advice') { show('advice'); return; }
       // 先拉一次最新 state（confirm_hint 里的剩余分钟跟着虚拟时钟走）
@@ -974,7 +1305,29 @@
       else await doOffwork({});   // 拿不到 hint（异常兜底）：直接生成
     }
     document.getElementById('startBtn').addEventListener('click', startNight);
-    document.getElementById('confirmOk').addEventListener('click', () => doOffwork({}));
+    /* 判断页唯一的推进出口：把攒了一屏的草稿一次性交给 /api/offwork。
+       body 缺省补「暂未确认」，与 B2 契约三键保持一致（后端 _map_calibration 只认这三键）。
+       已定态下这颗键有两副面孔（文案见 applyConfirmState）：没有未提交的变更就只是
+       「看今晚的安排」——纯切屏、一次接口都不调；有变更才带 replan 重算，改了几项就
+       只算这一次，不像以前每改一次就在后台偷跑一遍 Agent、还生成一堆中间态的半成品。 */
+    document.getElementById('confirmOk').addEventListener('click', () => {
+      const settled = !!currentAdvice;
+      // 走不走接口，和上面那句文案必须问同一个问题（confirmDirty），否则会出现
+      // 键上写着「看今晚的安排」、按下去却跑十几秒重算这种自相矛盾。草稿满不满不作数：
+      // 满而不脏，说明这些主张早就算进今晚的安排里了，此刻该做的就只是过去看它。
+      if (settled && !confirmDirty) { show('advice'); return; }
+      const payload = {};
+      // 交什么则要问草稿：脏位只说明"有变更"，真正要送过去的是用户对今晚三行的全部主张。
+      if (!draftEmpty()) payload.calibration = {
+        time_budget_min: confirmDraft.time_budget_min != null ? confirmDraft.time_budget_min : null,
+        energy: confirmDraft.energy || null,
+        body: confirmDraft.body || '暂未确认',
+      };
+      // replan 只在已定态带：未定态（含双击第二次）不带，后端那条「已有建议就原样返回」
+      // 的双击防护照旧生效。走到这里必然有未提交的变更，所以已定态一律是要重算的。
+      if (settled) payload.replan = true;
+      doOffwork(payload);
+    });
 
     /* ---------- 改一下抽屉（B2）：时间滚轮默认停在 remaining_min ---------- */
     const CAL_MIN = 20, CAL_MAX = 180, CAL_STEP = 10;
@@ -985,7 +1338,7 @@
       const track = document.getElementById('calTimeWheel');
       calList.forEach(v => {
         const s = document.createElement('span');
-        s.textContent = `${v} 分钟`; s.setAttribute('role', 'option');
+        s.textContent = fmtDuration(v); s.setAttribute('role', 'option');
         track.appendChild(s);
       });
       let timer;
@@ -1002,12 +1355,23 @@
       document.getElementById('calTimeWheel').querySelectorAll('span').forEach((s, i) =>
         i === idx ? s.setAttribute('data-on', '') : s.removeAttribute('data-on'));
     }
+    // 滚轮只有 20–180 分钟、10 分钟一档，所以「后端估的 87 分钟」落到轮子上是 90。
+    // 判断"用户到底改没改过时间"必须拿这个同样取整过的值比，否则原样保存也会被当成改过，
+    // 那一行会平白摘掉「估」徽标、改口说"你刚改的"。
+    const clampCal = m => Math.max(CAL_MIN, Math.min(CAL_MAX, Math.round(m / CAL_STEP) * CAL_STEP));
     function setCalWheel(minutes) {
-      const clamped = Math.max(CAL_MIN, Math.min(CAL_MAX, Math.round(minutes / CAL_STEP) * CAL_STEP));
+      const clamped = clampCal(minutes);
       const idx = calList.indexOf(clamped);
       calTimeVal = calList[idx];
       document.getElementById('calTimeWheel').scrollTop = idx * 40;
       markCal(idx);
+    }
+    // 「有明显不适」才展开补充框；切走该项时收起并清空，避免残留一句用户已经改主意的话
+    function syncCalBodyNote() {
+      const note = document.getElementById('calBodyNote');
+      const on = document.querySelector('[data-cal="body"][data-val="有明显不适"]').getAttribute('aria-pressed') === 'true';
+      note.hidden = !on;
+      if (!on) note.value = '';
     }
     document.querySelectorAll('[data-cal]').forEach(el =>
       el.addEventListener('click', () => {
@@ -1015,26 +1379,89 @@
         const wasOn = el.getAttribute('aria-pressed') === 'true';
         document.querySelectorAll(`[data-cal="${g}"]`).forEach(o => o.setAttribute('aria-pressed', 'false'));
         if (!wasOn) el.setAttribute('aria-pressed', 'true');   // 再点一次可取消（回到"暂未确认/不改"）
+        if (g === 'body') syncCalBodyNote();
       }));
     function openAdjust() {
       const h = (lastState && lastState.confirm_hint) || {};
-      setCalWheel(h.remaining_min || 60);
+      const d = confirmDraft || {};
+      // 抽屉每次打开都停在「判断页此刻显示的值」上——草稿优先于后端估算，
+      // 否则用户改完再点开会看到自己刚改的那一项被打回原样，像是没生效
+      setCalWheel(d.time_budget_min != null ? d.time_budget_min : (h.remaining_min || 60));
+      const energyNow = d.energy || h.energy_guess;
       document.querySelectorAll('[data-cal="energy"]').forEach(o =>
-        o.setAttribute('aria-pressed', String(o.getAttribute('data-val') === h.energy_guess)));
-      // 身体一栏不再预置：第 6 条之后「身体不舒服」走独立 sheet，这里只留用户手动选
-      document.querySelectorAll('[data-cal="body"]').forEach(o => o.setAttribute('aria-pressed', 'false'));
+        o.setAttribute('aria-pressed', String(o.getAttribute('data-val') === energyNow)));
+      // 身体一栏不预置后端值（后端永远给不出判断），但用户自己改过的要回显
+      document.querySelectorAll('[data-cal="body"]').forEach(o =>
+        o.setAttribute('aria-pressed', String(!!d.body && o.getAttribute('data-val') === d.body)));
+      syncCalBodyNote();
+      // 已经说过的几句合成一行回显，让用户在原文上接着改（「感冒」→「感冒、头痛」）。
+      // 记住这个初值：保存时和它一比就知道用户到底有没有说新东西，没说就别再往库里
+      // 插一条一模一样的——原样打开原样保存，不该在「你补充的」里多出一条重复的话，
+      // 更不该让 Agent 把同一句看成两次陈述。
+      calBodyNoteBefore = noteList(d.body_note).join('、');
+      document.getElementById('calBodyNote').value = calBodyNoteBefore;
       openSheet('adjustSheet');
     }
-    document.querySelectorAll('[data-adjust]').forEach(b => b.addEventListener('click', () => openAdjust()));
-    document.getElementById('calSave').addEventListener('click', () => {
+    let adjustTrigger = null;   // 是哪个「改一下」链接打开的抽屉：作为该抽屉通知的锚点
+    let calBodyNoteBefore = '';  // 抽屉打开时身体附言的初值（判"用户有没有说新东西"）
+    document.querySelectorAll('[data-adjust]').forEach(b => b.addEventListener('click', () => { adjustTrigger = b; openAdjust(); }));
+    /* 「按这个记下」：V3 定稿——改一下只回写判断页那三行，不生成、不切屏。
+       结构化的三项攒进 confirmDraft（等黄键一起交给 /api/offwork）；
+       「有明显不适」附的那句话仍然立刻落库（进【今天已知】+ 过后端即时安全闸门），
+       但它同样只是回到判断页显示出来，不再顺手把用户推到建议页。 */
+    document.getElementById('calSave').addEventListener('click', async () => {
       const val = g => { const el = document.querySelector(`[data-cal="${g}"][aria-pressed="true"]`); return el ? el.getAttribute('data-val') : null; };
-      const calibration = {
-        time_budget_min: calTimeVal,
-        energy: val('energy'),
-        body: val('body') || '暂未确认',
-      };
+      const bodyVal = val('body');
+      const energyVal = val('energy');
+      const note = bodyVal === '有明显不适' ? document.getElementById('calBodyNote').value.trim() : '';
       closeSheets();
-      doOffwork({ calibration });
+      const h = (lastState && lastState.confirm_hint) || {};
+      confirmDraft = confirmDraft || {};
+      // 保存前后比一次：只有草稿真的变了才算"有未提交的变更"。开着抽屉什么都没动就保存
+      // （已定态很常见——回来核对一遍发现没错）不该把黄键从「看今晚的安排」拨成
+      // 「按改后的重新安排」，那会骗用户去点一次白跑十几秒的重算。
+      const draftBefore = JSON.stringify(confirmDraft);
+      // 时间只在真的和后端估算不同时才算"改过"（比的是取整到轮子档位后的值，见 clampCal）：
+      // 滚轮默认就停在估算值上，原样保存不该让那一行摘掉「估」徽标、改口说"你刚改的"
+      // 手选的三项一律清掉同名 *_note：这行的值现在是用户亲手定的，依据行不能再挂着
+      // 「你说：……」去替一句旧话背书
+      if (calTimeVal != null && h.remaining_min != null && calTimeVal !== clampCal(h.remaining_min)) {
+        confirmDraft.time_budget_min = calTimeVal;
+      } else delete confirmDraft.time_budget_min;
+      delete confirmDraft.time_note;
+      if (energyVal && energyVal !== h.energy_guess) confirmDraft.energy = energyVal;
+      else delete confirmDraft.energy;
+      delete confirmDraft.energy_note;
+      // 身体的 note 是用户自己附的那句话，依据行原样回显它（「你说：胃不舒服」）。
+      // 附言真动过时是【替换】而不是追加：抽屉把已说过的几句合成一行摊在输入框里让人
+      // 直接改，框里最后剩什么就是他此刻的完整主张，追加只会把他刚删掉的话又请回来。
+      const noteChanged = !!note && note !== calBodyNoteBefore;
+      if (bodyVal) {
+        confirmDraft.body = bodyVal;
+        // 没动过就把原来那几句原样留着——不能把 ["感冒","头痛"] 拍平成 ["感冒、头痛"]，
+        // 那样下面那次 JSON 比较会把"什么都没改"误判成"改过了"，黄键跟着变脸
+        if (noteChanged) confirmDraft.body_note = [note];
+        else if (!note) confirmDraft.body_note = [];
+      } else { delete confirmDraft.body; delete confirmDraft.body_note; }
+      if (JSON.stringify(confirmDraft) !== draftBefore || noteChanged) confirmDirty = true;
+      renderConfirm();
+      // 附言没动过（原样打开原样保存）就不再落一条库：同一句话在「你补充的」里出现两遍、
+      // 在 Agent 上下文里被当成说了两次，都是我们自己造出来的假信息
+      if (!noteChanged) { notice(adjustTrigger, '记下了'); return; }
+      setLoading(true, adjustTrigger);
+      // defer：这句附言只落库、不重算。已定态也一样——判断页上的动作永远只回写这一屏，
+      // 要不要按它重来由用户按黄键决定，不由这一屏替他决定。
+      const data = await api('/api/free_input', { text: note, defer: true });
+      setLoading(false);
+      if (!data) return;
+      if (data.error) { toast(data.error); return; }
+      // 劝退 / 即时安全闸门命中：安全永远赢过"留在判断页"，交给 refreshState 去硬退出
+      if (data.rejected || data.safety_exit) { await refreshState(); return; }
+      // 这句附言里若还说到了时间/精力（"胃不舒服，而且累得不行"），一并写回那两行；
+      // 用户刚在抽屉里亲手选过的项跳过——手选压过推断
+      mergeApplied(data.applied, note, [bodyVal ? 'body' : null, energyVal ? 'energy' : null]);
+      await refreshState({ keepScreen: true });       // 让这句话出现在「你补充的」里（它会重渲判断页）
+      notice(adjustTrigger, '记下了');
     });
 
     /* ---------- 生成（offwork）：回执待收则暂存 payload，先收回执（B2 牵连 5） ---------- */
@@ -1048,10 +1475,15 @@
         pendingOffworkPayload = payload || {};
         const a = data.record.advice || {};
         openRecall(data.record.record_id, a);
-        toast('先说说昨晚那条怎么样，说完我就开始安排');
+        notice(document.getElementById('startBtn'), '先说说昨晚那条怎么样，说完我就开始安排');
         return;
       }
       currentAdvice = data.advice;
+      // 只清「未提交」标志，草稿本身留着：它是用户对今晚三行的主张，今晚一直成立。
+      // 清了的话退回判断页，那三行会回落到 confirm_hint 的系统估算——用户说了"很低"、
+      // 建议也是按"很低"出的，屏上却又变回"还行【估】"，等于当着他的面改口。
+      // 跨天才作废（见 refreshState 的 crossDay 分支）。
+      confirmDirty = false;
       await refreshState();   // 用最新 state 统一渲染（时间带/回执行/时钟一起对齐）
     }
 
@@ -1172,9 +1604,9 @@
       spent.hidden = !commuteMin;
       spent.style.flex = `${commuteMin} 1 0`;
       document.getElementById('segFree').style.flex = `${freeMin} 1 0`;
-      document.getElementById('labSpent').textContent = commuteMin ? `路上 ${commuteMin} 分钟` : '';
+      document.getElementById('labSpent').textContent = commuteMin ? `路上 ${fmtDuration(commuteMin)}` : '';
       document.getElementById('labSpent').style.flex = `${commuteMin} 1 0`;
-      document.getElementById('labFree').textContent = `可支配时间 ${freeMin} 分钟`;
+      document.getElementById('labFree').textContent = `可支配时间 ${fmtDuration(freeMin)}`;
       document.getElementById('labFree').style.flex = `${freeMin} 1 0`;
     }
 
@@ -1241,22 +1673,27 @@
     });
 
     /* ---------- 抽屉动作：纠正/难度/换做法（类型字符串逐字对齐后端） ---------- */
+    // 「我要补充」按钮自身：作为该抽屉触发的通知的锚点。confirm/advice 两屏都有这同一入口，
+    // 按 activeScreen 现取，保证通知总落在当前屏那一个按钮上。
+    const noteBtn = () => document.querySelector(`#s-${activeScreen} .foot [data-note-open]`);
     document.querySelectorAll('[data-correct]').forEach(btn =>
       btn.addEventListener('click', async () => {
         const type = btn.getAttribute('data-correct');
         closeSheets();
-        setLoading(true);
+        // 快捷区只在建议页出现，按下去必定重跑一次 Agent——不能借「正在记」那句，
+        // 那是判断页只落库时用的，会让用户以为一秒就完（实际十几秒）。
+        setLoading(true, noteBtn(), '正在重新安排，大约十几秒…');
         const data = await api('/api/correct', { type });
         setLoading(false);
         if (data && data.rejected) { await refreshState(); return; }
-        if (data && data.message && !data.new_level) { toast(data.message); return; }   // 到顶/到底：不重渲染（②-17/18）
+        if (data && data.message && !data.new_level) { notice(noteBtn(), data.message); return; }   // 到顶/到底：不重渲染（②-17/18）
         if (data && data.advice) {
           currentAdvice = data.advice;
           await refreshState();
-          if (data.yesterday_updated) toast('已把昨晚记为「完成了」，档位重算，建议已更新');
-          else toast(`已按「${type === '难度再低一点' ? '再轻一点' : type === '难度再高一点' ? '再加一点' : type}」重新安排`);
+          if (data.yesterday_updated) notice(noteBtn(), '已把昨晚记为「完成了」，档位重算，建议已更新');
+          else notice(noteBtn(), type === '难度再低一点' ? '已调轻一点' : type === '难度再高一点' ? '已调重一点' : '已换一种做法');
         } else {
-          toast((data && data.error) || '重新生成失败，再试一次');
+          notice(noteBtn(), (data && data.error) || '重新生成失败，再试一次');
         }
       }));
 
@@ -1277,83 +1714,156 @@
       localStorage.removeItem(DECLINED_KEY);
       startNight();
     });
-    // 安全结束页「回到首页」：只切回 home（当天建议仍是 danger/crisis，下次进来 state 仍会判回安全结束页）
-    document.getElementById('safetyExitHome').addEventListener('click', () => show('home'));
+    // 安全结束页「回到首页」：切回 home + 手动退灰阶。data-sober 只由 applySober(state) 驱动，
+    // 而这里是纯前端切屏、不重新 fetch state，若不手动清掉就会拿着安全结束页那次的灰阶一直挂在 body 上，
+    // 把 Home 也一起染灰（灰阶本该只属于安全结束页本身）。
+    // 当天建议仍是 danger/crisis：下次 refreshState 判定仍会跳回安全结束页，那时 applySober 会重新置灰，
+    // 属于预期内的「安全永远赢」——这里清的只是这次手动切屏留下的残留灰阶。
+    document.getElementById('safetyExitHome').addEventListener('click', () => {
+      document.body.removeAttribute('data-sober');
+      show('home');
+    });
     // 已定页「回首页」：切回 home 做补充（锁定态仍有效，下次进来 state 仍会判回已定页）
     document.getElementById('acceptedHome').addEventListener('click', () => show('home'));
+    // 鼓励屏「回首页」：同上，纯前端切屏，不必等凌晨自动重置才能离开
+    document.getElementById('doneHome').addEventListener('click', () => show('home'));
 
     /* ---------- 补充一句（noteSheet）/ 树洞 → /api/free_input ---------- */
     // generateIfNone：当天还没建议时，是否接着生成今晚安排。
     //「我要补充」（合并了原「身体不舒服」）传 true——保留原身体不舒服的行为：说一句直接开始今晚；
     // 树洞（home 随手说一句）传 false/缺省——只记下，不替用户触发生成。
-    async function sendFree(text, sourceInput, generateIfNone) {
+    async function sendFree(text, sourceInput, generateIfNone, anchorBtn) {
       if (!text.trim()) return;
-      setLoading(true);
-      const data = await api('/api/free_input', { text: text.trim() });
+      // defer 只在「我要补充」（generateIfNone=true，建议页专属）时不带：用户手上已经有
+      // 一份安排，说的话就是冲着改它去的，该立刻重算。树洞（generateIfNone 缺省/false）
+      // 不论当天有没有建议、哪怕已经接受/锁定，都只记下——树洞不是「对着建议说话」的入口，
+      // 要改计划走判断页/黄键。记下的话不会被浪费：下次不管从哪触发重算，
+      // db.get_free_inputs 都会把当天全部自由输入重新收一遍，这句话照样会被带进去。
+      const willRecompute = generateIfNone && !!currentAdvice;
+      setLoading(true, anchorBtn, willRecompute ? '正在重新安排，大约十几秒…' : undefined);
+      const data = await api('/api/free_input', { text: text.trim(), defer: !generateIfNone });
       setLoading(false);
       if (!data) return;
-      if (data.error) { toast(data.error); return; }
+      if (data.error) { notice(anchorBtn, data.error); return; }
       if (data.rejected) { await refreshState(); return; }
+      // 即时安全闸门命中（后端已当场生成安全模式建议并落库）：直接交给 refreshState 硬退出
+      if (data.safety_exit) { await refreshState(); return; }
       if (sourceInput) sourceInput.value = '';
+      // 这句话里明确说到的三项也并进判断页草稿：用户在 Home 说过的话，等他进判断页时
+      // 那三行必须已经是他说的样子，不能在别的屏说了话、到判断页又变回"我估的"
+      const hit = mergeApplied(data.applied, text.trim());
       if (data.advice) {
         currentAdvice = data.advice;
-        await refreshState();
-        toast(data.advice.severe_notice ? data.advice.severe_notice : '已把这句话考虑进去，建议更新了');
+        await refreshState({ keepScreen: true });
+        notice(anchorBtn, data.advice.severe_notice ? data.advice.severe_notice : '已把这句话考虑进去，建议更新了');
       } else if (generateIfNone) {
-        await refreshState();            // 先让补充记录立即出现在常驻列表
+        await refreshState({ keepScreen: true });   // 先让补充记录立即出现在常驻列表
         await doOffwork({});             // 当天还没建议：接着生成今晚安排
       } else {
-        await refreshState();            // 树洞：记下即可，刷新出常驻记录
-        toast(data.message || '已记下');
+        // 树洞只记下、不重算，但草稿被这句话动过了（hit）就必须置脏——不然判断页黄键
+        // 会顶着「看今晚的安排」的文案，其实草稿里躺着一笔没交给 Agent 的改动，跟
+        // sendFreeToConfirm 那句「记下了，判断改好了」是同一件事，不能因为入口不同就漏说。
+        if (hit) confirmDirty = true;
+        // keepScreen：树洞只记下，不该把人从 Home 弹到已定页——即使锁定态有效，Home 也是
+        // Q2 回退链允许停留的屏（同 acceptedHome「回首页」），不是「状态失配」。
+        await refreshState({ keepScreen: true });   // 刷新出常驻记录（若已定态则同步刷新判断页三行）
+        notice(anchorBtn, data.message || '已记下');
       }
+    }
+    /* 判断页版的「补充一句」：只落库 + 回到判断页显示，绝不推进。
+       这是新规则的核心——判断页上没有任何按钮会替用户跳到建议页，只有黄键会。
+       今晚已经生成过一次也一样：这一屏的规则不因为"今晚已经有安排了"就反转，否则同一颗
+       按钮、同一句副标题「先记下」，第二次按下去却在后台跑十几秒的完整重算，人还留在原地
+       什么都看不到。要不要按这句话重来，交给黄键、交给用户。
+       但"不推进"不等于"不生效"：这句话里明确说到的时间/精力/身体，后端 applied 已经
+       抽好，这里并进草稿当场写回那三行——用户说了"胃不舒服"，身体那行还挂着"暂未确认"
+       就是在骗人。抽不出来就退化成老样子：只留在下面的「你补充的」列表里。 */
+    async function sendFreeToConfirm(text, sourceInput) {
+      if (!text.trim()) return;
+      setLoading(true, noteBtn());
+      const data = await api('/api/free_input', { text: text.trim(), defer: true });
+      setLoading(false);
+      if (!data) return;
+      if (data.error) { notice(noteBtn(), data.error); return; }
+      // 劝退 / 即时安全闸门命中：安全永远赢过"留在判断页"
+      if (data.rejected || data.safety_exit) { await refreshState(); return; }
+      if (sourceInput) sourceInput.value = '';
+      // 这句话抽不抽得出那三行都算一笔未提交的变更：抽不出来（"刚吃完火锅"）时草稿是空的，
+      // 不置这个标志的话已定态黄键会一直是「看今晚的安排」，这句话就永远没有出口了。
+      confirmDirty = true;
+      const hit = mergeApplied(data.applied, text.trim());
+      await refreshState({ keepScreen: true });   // 会连带重渲判断页三行 +「你补充的」
+      notice(noteBtn(), hit ? '记下了，判断改好了' : '记下了');
     }
     document.getElementById('noteSubmit').addEventListener('click', () => {
       const el = document.getElementById('noteText');
+      const onConfirm = activeScreen === 'confirm';
       closeSheets();
-      // 合并了「身体不舒服」：当天还没建议时，说一句就直接开始生成今晚安排
-      sendFree(el.value, el, true);
+      // 判断页：只记下、留在原地；其余屏（建议页）：沿用原来的提交并重算
+      if (onConfirm) sendFreeToConfirm(el.value, el);
+      else sendFree(el.value, el, true, noteBtn());
     });
     /* ---------- 树洞 / 食记：Home 与锁定屏各有一份同构 DOM（Q2），
        所以下面全部用事件委托 + 就近 [data-tools] 取元素，不依赖全局 id ---------- */
     const toolsOf = el => el.closest('[data-tools]');
     const pick = (scope, sel) => scope ? scope.querySelector(sel) : null;
+    const MEAL_PROMPT = '拍下今天吃的，晚餐建议更贴近你';
+    // 把食记气泡收回「拍照提示」态：清掉回执文案与更正输入，不删记录（记录仍在 home 常驻列表里看得到）。
+    function resetMealPanel(scope) {
+      const note = pick(scope, '[data-meal-note]');
+      if (note) note.textContent = MEAL_PROMPT;
+      const actions = pick(scope, '[data-receipt-actions]');
+      if (actions) actions.hidden = true;
+      const row = pick(scope, '[data-correct-row]');
+      if (row) row.hidden = true;
+      const text = pick(scope, '[data-correct-text]');
+      if (text) text.value = '';
+    }
 
     document.addEventListener('click', e => {
       const t = e.target.closest && e.target.closest(
-        '[data-free-send],[data-photo-pick],[data-photo-delete],[data-receipt-dismiss],[data-panel]');
+        '[data-free-send],[data-photo-pick],[data-photo-delete],[data-receipt-dismiss],'
+        + '[data-meal-correct],[data-correct-send],[data-panel]');
       if (!t) return;
       const scope = toolsOf(t);
-      // 面板开合（共享展开位：开一个关另一个；拍照回执不受影响）
+      // 面板开合（共享展开位：开一个关另一个）
       if (t.hasAttribute('data-panel')) {
         const name = t.getAttribute('data-panel');
         const panel = pick(scope, `[data-panel-name="${name}"]`);
         const isOpen = !panel.hidden;
-        scope.querySelectorAll('.homepanel').forEach(p => {
-          if (p.getAttribute('data-panel-name') !== 'receipt') p.hidden = true;
-        });
+        scope.querySelectorAll('.homepanel').forEach(p => { p.hidden = true; });
         scope.querySelectorAll('[data-panel]').forEach(c => c.setAttribute('aria-expanded', 'false'));
         if (!isOpen) { panel.hidden = false; t.setAttribute('aria-expanded', 'true'); }
         return;
       }
       if (t.hasAttribute('data-free-send')) {
         const el = pick(scope, '[data-free-text]');
-        sendFree(el.value, el);
+        // 锚定到「说给它」自己（同「我要补充」传 noteBtn() 的做法）：不传的话 setLoading/notice
+        // 会退回抓屏幕主按钮（home 是「开始今晚」）和全局 toast，把树洞这句附加话的反馈
+        // 借用/盖在黄键上（反馈：黄键不该因为一句附加话就变了样，全局 toast 会跟按钮撞在一起）。
+        sendFree(el.value, el, false, t);
         return;
       }
       if (t.hasAttribute('data-photo-pick')) { pick(scope, '[data-photo-input]').click(); return; }
       if (t.hasAttribute('data-photo-delete')) { deleteMeal(scope); return; }
-      // 「知道了」：只收起回执气泡，不删记录（记录仍在 home 常驻列表里看得到）
-      if (t.hasAttribute('data-receipt-dismiss')) {
-        const r = pick(scope, '[data-panel-name="receipt"]');
-        if (r) r.hidden = true;
+      // 「没错」：只收回气泡到拍照提示态，不删记录（记录仍在 home 常驻列表里看得到）
+      if (t.hasAttribute('data-receipt-dismiss')) { resetMealPanel(scope); return; }
+      // 「更正」：就地展开/收起下面那行输入，不动上面已经显示的回执文案
+      if (t.hasAttribute('data-meal-correct')) {
+        const row = pick(scope, '[data-correct-row]');
+        if (!row) return;
+        row.hidden = !row.hidden;
+        if (!row.hidden) pick(scope, '[data-correct-text]').focus();
         return;
       }
+      if (t.hasAttribute('data-correct-send')) { sendCorrection(scope); return; }
     });
     document.addEventListener('keydown', e => {
       const el = e.target.closest && e.target.closest('[data-free-text]');
       if (!el || e.key !== 'Enter' || e.shiftKey) return;
       e.preventDefault();
-      sendFree(el.value, el);
+      // 同 data-free-send 点击那支：锚定到「说给它」自己，不走全局 toast/黄键
+      sendFree(el.value, el, false, pick(toolsOf(el), '[data-free-send]'));
     });
 
     /* ---------- 食记：单张上传（③-15）+ 确认句 + 记错了？删除。
@@ -1386,13 +1896,14 @@
       const input = e.target.closest && e.target.closest('[data-photo-input]');
       if (!input || !input.files.length) return;
       const scope = toolsOf(input);
-      // 识别可能较慢（服务端要调视觉模型）+ 45s 超时兜底。进行态直接放进回执气泡里
-      //（结果本来就出现在这），不再浮一个框盖在按钮上方。识别中先藏掉「知道了/删除」。
-      const receipt = pick(scope, '[data-panel-name="receipt"]');
-      pick(scope, '[data-photo-msg]').textContent = '在认这是什么…可能要等一小会儿';
+      // 识别可能较慢（服务端要调视觉模型）+ 45s 超时兜底。进行态文案直接换在同一个气泡里
+      //（结果本来就出现在这），不再另开一个框盖在按钮上方。识别中先藏掉「没错/更正/删除」。
+      const note = pick(scope, '[data-meal-note]');
+      if (note) note.textContent = '在认这是什么…可能要等一小会儿';
       const actions = pick(scope, '[data-receipt-actions]');
       if (actions) actions.hidden = true;
-      if (receipt) receipt.hidden = false;
+      const correctRow = pick(scope, '[data-correct-row]');
+      if (correctRow) correctRow.hidden = true;
       // 上传前压缩：手机原图动辄 3-5MB，跨洲上传+识别都慢。压到长边 1280、JPEG 0.7，
       // 通常能到 ~200KB，明显加快。压缩失败则退回原图（不阻塞上传）。
       const raw = input.files[0];
@@ -1409,18 +1920,18 @@
           signal: ctrl.signal,
         });
         const data = await res.json();
-        // 失败走 throw → catch 里收起进行态气泡（不能 return，否则半截气泡留在屏上）
+        // 失败走 throw → catch 里把气泡收回拍照提示态（不能 return，否则半截气泡留在屏上）
         if (!res.ok || !data.ok) { throw new Error(data.error || 'fail'); }
         lastMealId = data.meal_id;
-        pick(scope, '[data-photo-msg]').textContent = data.message;
-        if (actions) actions.hidden = false;   // 识别完成，恢复「知道了/删除」
+        if (note) note.textContent = data.message;
+        if (actions) actions.hidden = false;   // 识别完成，恢复「没错/更正/删除」
         // 立即刷新，让 home 常驻记录马上出现（不必等下次时钟/操作触发 refreshState）。
         // 此时 today_meals 必非空，不会误触发「空则收起回执」逻辑。
-        await refreshState();
+        // keepScreen：食记跟树洞一样不重算建议，不该把人从 Home 弹到已定页。
+        await refreshState({ keepScreen: true });
       } catch (err) {
-        // 识别失败：收起进行态回执气泡（没成功就别留半截），用 toast 说明
-        if (receipt) receipt.hidden = true;
-        if (actions) actions.hidden = false;   // 复位，供下次上传
+        // 识别失败：气泡收回拍照提示态（没成功就别留半截），用 toast 说明
+        resetMealPanel(scope);
         toast(err.name === 'AbortError' ? '这张认得有点久，先跳过，晚点再试' : '没认出来，晚点再试');
       } finally {
         clearTimeout(timer);
@@ -1430,14 +1941,29 @@
     async function deleteMeal(scope) {
       if (!lastMealId) return;
       const d = await api('/api/meal/delete', { meal_id: lastMealId });
-      pick(scope, '[data-panel-name="receipt"]').hidden = true;
+      resetMealPanel(scope);
       if (d && d.ok) toast(d.message);
       else toast((d && d.error) || '删除失败');
     }
+    // 「更正」提交：直接用用户这句话覆盖识别结果，不重跑视觉模型，气泡换成新的确认句。
+    async function sendCorrection(scope) {
+      const el = pick(scope, '[data-correct-text]');
+      const text = (el && el.value || '').trim();
+      if (!text || !lastMealId) return;
+      const d = await api('/api/meal/update', { meal_id: lastMealId, text });
+      if (!d || !d.ok) { toast((d && d.error) || '没改成，再试一次'); return; }
+      const note = pick(scope, '[data-meal-note]');
+      if (note) note.textContent = d.message;
+      const row = pick(scope, '[data-correct-row]');
+      if (row) row.hidden = true;
+      if (el) el.value = '';
+      await refreshState({ keepScreen: true });   // 同上：更正食记不该把人从 Home 弹到已定页
+    }
 
-    /* ---------- 安全出口（第 6 条）：两处入口（Home / s-confirm）统一弹「哪里不舒服」sheet。
-       链路：/api/free_input 存句子 → 已有建议时它自己就会重算；还没建议则接着 /api/offwork 生成。
-       句子既进【今天已知】也进 safety.assess，danger/crisis 由后端判定 → applySober 自动转灰卡/危机整卡。
+    /* ---------- 安全出口（第 6 条）：Home 的「身体不舒服」快捷入口。
+       链路：/api/free_input 存句子 → 后端即时安全闸门（danger/crisis 当场硬退出）
+       → 否则带着这句话进判断页，身体那行已经写成「有明显不适」、句子也列在「你补充的」里，
+       由用户自己按「就按这个安排」推进（与判断页新规则一致：说了话不等于替他做决定）。
        前端不做任何词表判断，也不预设严重程度。 ---------- */
     document.querySelectorAll('[data-safety-exit]').forEach(b =>
       b.addEventListener('click', () => {
@@ -1449,27 +1975,50 @@
       // 空着提交＝只表达按钮本身的意思，仍然交给后端判断，不在前端加工
       const text = el.value.trim() || '身体不太舒服';
       closeSheets();
-      setLoading(true);
+      // home 的「身体不舒服」：已定态会立刻重算（十几秒），未定态只落库后带人进判断页（一秒）。
+      // 两种耗时差一个数量级，文案不能共用一句。
+      setLoading(true, null, currentAdvice ? '正在重新安排，大约十几秒…' : '正在记，稍等…');
       const data = await api('/api/free_input', { text });
       setLoading(false);
       if (!data) return;
       if (data.error) { toast(data.error); return; }
-      if (data.rejected) { await refreshState(); return; }
+      // 劝退 / 即时安全闸门命中：安全永远赢，直接硬退出
+      if (data.rejected || data.safety_exit) { await refreshState(); return; }
       el.value = '';
       if (data.advice) {
-        // 当天已有建议：free_input 已经带着这句话重算完（danger 会在 refreshState 里转 sober）
+        // 当天已有建议：free_input 已经带着这句话重算完
         currentAdvice = data.advice;
         await refreshState();
         toast(data.advice.severe_notice || '记下了，今晚按这个重新安排了');
         return;
       }
-      // 当天还没建议：接着生成。state 沿用既有的「不太舒服」下班状态（回执待收由 doOffwork 兜住）
-      await doOffwork({ state: '不太舒服' });
+      // 当天还没建议：把这句话记进判断页草稿，进判断页等用户确认。
+      // 身体那行按「身体不舒服」这个入口本身的意思写死成"有明显不适"（用户是从这个按钮
+      // 进来的，这就是他要表达的事，不能因为后端没抽出来就退回"暂未确认"）；
+      // 同一句话里若还说到了时间/精力（"胃不舒服，今晚只有一小时"），一并写回那两行。
+      confirmDraft = confirmDraft || {};
+      mergeApplied(data.applied, text, ['body']);
+      // 身体这行由这个入口写死成"有明显不适"，原话按 mergeApplied 的同一条规则并进去：
+      // 值和已有的一样就追加（之前说过"感冒"，这次从这个按钮说"头痛"，两句都留），
+      // 不一样才作废旧话。这里手写而不是走 mergeApplied，是因为值不来自抽取而来自入口本身。
+      const bodyNotes = confirmDraft.body === '有明显不适' ? noteList(confirmDraft.body_note) : [];
+      confirmDraft.body = '有明显不适';
+      confirmDraft.body_note = bodyNotes.includes(text) ? bodyNotes : bodyNotes.concat(text);
+      await refreshState({ keepScreen: true });   // 取回 today_notes，让这句话出现在「你补充的」
+      if (renderConfirm()) { show('confirm'); toast('记下了，看一下判断对不对'); }
+      else await doOffwork({ state: '不太舒服' });   // 拿不到 hint（异常兜底）：沿用原路径直接生成
     });
 
     /* ---------- 时钟条 + 30s 轮询（②-25 / ③-3） ---------- */
+    // 说明气泡的收起：「知道了」或第一次真用拨钟（用过 = 已经懂了），永久不再出
+    function dismissClockTip() {
+      localStorage.setItem('clockTipSeen', '1');
+      document.getElementById('clockTip').hidden = true;
+    }
+    document.getElementById('clockTipOk').addEventListener('click', dismissClockTip);
     document.querySelectorAll('[data-clock]').forEach(btn =>
       btn.addEventListener('click', async () => {
+        dismissClockTip();
         await fetch('/api/clock', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1510,6 +2059,7 @@
       location.href = 'index.html';
     });
     document.getElementById('aboutEntry').addEventListener('click', () => show('about'));
+    document.getElementById('basicInfoEntry').addEventListener('click', () => show('basicinfo'));
     // 「下班时找我」开关：状态第二载体是滑块位置（DESIGN Switch 硬规则）
     const remSwitch = document.getElementById('reminderSwitch');
     remSwitch.setAttribute('aria-checked', String(reminderEnabled()));
@@ -1592,28 +2142,32 @@
 
     /* ---------- 启动 ---------- */
     (async () => {
-      const res = await fetch('/api/profile', { headers: AUTH });
-      if (res.ok) profile = (await res.json()).profile;
-      await refreshState();
-      // 首次完成 onboarding（?firstnight=1）：直接进「确认屏」看到今晚判断，不停在空 home。
-      // 仅当 refreshState 已落到 home/advice（非 rejected/锁定屏）时才接管——安全/异常路由优先。
-      const params = new URLSearchParams(location.search);
-      if (params.get('firstnight') === '1') {
-        history.replaceState(null, '', location.pathname);   // 清掉参数，避免刷新/后退再触发
-        if (activeScreen === 'home' || activeScreen === 'advice') await startNight();
-      }
-      // 从资料页返回（app.html#settings）：稳稳落回设置屏，而不是 home（问题2）。
-      // 仅在落到 home/advice 这类常规屏时接管，rejected/锁定屏等安全路由优先。
-      if (location.hash === '#settings') {
-        history.replaceState(null, '', location.pathname);   // 清掉锚点，避免刷新残留
-        if (activeScreen === 'home' || activeScreen === 'advice') show('settings');
+      try {
+        const res = await fetch('/api/profile', { headers: AUTH });
+        if (res.ok) profile = (await res.json()).profile;
+        // 首次完成 onboarding（?firstnight=1）：把信号传进 refreshState，让它在路由时直接落「确认屏」，
+        // 不先经过 home 再跳（消除 home 闪现）。参数先清，避免刷新/后退再触发。
+        const params = new URLSearchParams(location.search);
+        const isFirstNight = params.get('firstnight') === '1';
+        if (isFirstNight) history.replaceState(null, '', location.pathname);
+        await refreshState(isFirstNight ? { firstNight: true } : undefined);
+        // 从资料页返回（app.html#basicinfo）：稳稳落回「基本情况」屏，而不是 home（问题2）。
+        // 仅在落到 home/advice 这类常规屏时接管，rejected/锁定屏等安全路由优先。
+        if (location.hash === '#basicinfo') {
+          history.replaceState(null, '', location.pathname);   // 清掉锚点，避免刷新残留
+          if (activeScreen === 'home' || activeScreen === 'advice') show('basicinfo');
+        }
+      } finally {
+        // 揭幕：不管落到哪一屏（含异常兜底），都只在启动流程彻底定屏后揭开一次——
+        // 中间 show() 过的屏（如 firstnight 路径上的 home）从未被用户看到。
+        document.body.removeAttribute('data-boot');
       }
     })();
   
 
 
     if(new URLSearchParams(location.search).get('loadtest')==='1'){setTimeout(()=>{
-      // 此时应已在 confirm 屏(firstnight);点「判断大致没错」触发 doOffwork→setLoading(true)
+      // 此时应已在 confirm 屏(firstnight);点「就按这个安排」触发 doOffwork→setLoading(true)
       const btn=document.getElementById('confirmOk');
       const before=btn?btn.textContent:'?';
       if(btn)btn.click();

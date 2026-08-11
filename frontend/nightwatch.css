@@ -590,7 +590,9 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
   text-decoration:underline; text-underline-offset:3px; cursor:pointer;
 }
 .textlink:hover{color:var(--text)}
-.rowsrc .textlink{flex:0 0 auto; white-space:nowrap; padding:10px 8px}
+/* 依据文字换行时，「改一下」的可见文字要跟第一行对齐。
+   按钮保留 44px 触控高度；只把带 10px 顶部内边距的可见字光学上移。 */
+.rowsrc .textlink{flex:0 0 auto; white-space:nowrap; padding:10px 8px; align-self:flex-start; transform:translateY(-10px)}
 
 /* ---------- 设置列表 ---------- */
 .setlist{
@@ -700,11 +702,19 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
 .recall .opt::before{width:18px; height:18px}
 .recall .opt[aria-pressed="true"]::after{display:none}
 .recall[data-done]{border-style:dashed}
-.recall[data-done] .opts{display:none}
+.recall[data-done] .opts,
+.recall[data-done] .minor,
+.recall[data-done] > .textlink{display:none}
 .recall[data-done] > p{
   margin:0; text-align:center;
   font-size:12.5px; line-height:1.2; font-weight:400;
 }
+/* 就地通知态：文案借用了按钮/文字链自己的位置，用虚线跟"平时能点"的实线做区分，
+   呼应 .recall[data-done] 同一套"虚线=只读态"语言。 */
+.btn[data-notice], .textlink[data-notice]{cursor:default}
+.btn.primary[data-notice]{background:transparent; color:var(--muted); border-style:dashed; border-color:var(--line-2)}
+.btn.ghost[data-notice]{border-style:dashed; color:var(--muted)}
+.textlink[data-notice]{text-decoration:none}
 .homelist{
   flex-shrink:0;
   margin:auto 0 0;
@@ -751,10 +761,9 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
   bottom:-9px; left:calc(var(--bubble-anchor) - 7px);
   width:14px; height:10px; background:var(--ink-2);
 }
-/* 箭头锚点跟随被点的格子：树洞=左格(默认25%)，食记/回执=右格(75%)。
+/* 箭头锚点跟随被点的格子：树洞=左格(默认25%)，食记=右格(75%)。
    选择器对齐实际属性名 data-panel-name（旧的 data-bubble 已被重构掉，故箭头一直指左格）。 */
-.homepanel[data-panel-name="meal"],
-.homepanel[data-panel-name="receipt"]{--bubble-anchor:75%}
+.homepanel[data-panel-name="meal"]{--bubble-anchor:75%}
 .homepanel .inline-row{position:relative; display:flex; align-items:center; gap:10px}
 .homepanel .field{
   min-height:52px; padding:12px 4px 12px 0;
@@ -775,9 +784,13 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
   position:absolute; right:0; top:50%; transform:translateY(-50%);
 }
 .homepanel .note{margin:0; padding-top:0; border-top:0}
-.homepanel[data-panel-name="meal"]{display:flex; align-items:center; gap:8px; min-height:52px}
-.homepanel[data-panel-name="meal"] .note{flex:1 1 auto}
-.homepanel[data-panel-name="meal"] .textlink{flex:0 0 auto; min-height:32px; padding:6px 0}
+/* 食记气泡：拍照提示行（mealtop）永远在，回执操作行/更正输入行按状态显示——
+   同一个气泡换内容，不再多开一层容器（差异清单反馈：不应该叠两个框）。 */
+.homepanel[data-panel-name="meal"] .mealtop{display:flex; align-items:center; gap:8px; min-height:52px}
+.homepanel[data-panel-name="meal"] .mealtop .note{flex:1 1 auto}
+.homepanel[data-panel-name="meal"] .mealtop .textlink{flex:0 0 auto; min-height:32px; padding:6px 0}
+.homepanel[data-panel-name="meal"] [data-receipt-actions]{gap:16px; margin-top:2px}
+.homepanel[data-panel-name="meal"] [data-correct-row]{margin-top:6px}
 .photothumbs{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0}
 .photothumbs img{
   width:56px; height:56px; border-radius:12px; border:1px solid var(--line);
@@ -785,6 +798,15 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
 }
 #s-home .body{display:flex; flex-direction:column}
 #s-home .voice{margin-top:16px}
+/* Home 中段留空：remindBar/recallCard 都不在时，把 voice 从底部插到 h1 与树洞/食记
+   之间居中，填掉问候大字后面那段空白；靠 order 插队而不挪 DOM，默认态视觉不变，
+   remindBar/recallCard 任一出现就让位回原位（.mid-empty 类由 JS 按两者的 hidden 同步）。 */
+#s-home .remindbar, #s-home .recall, #s-home .homelist, #s-home .meallog, #s-home .voice-slot{order:2}
+#s-home.mid-empty .voice-slot{
+  order:1; flex:1 1 auto; min-height:0;
+  display:flex; flex-direction:column; justify-content:center;
+}
+#s-home.mid-empty .voice-slot .voice{margin-top:0}
 
 /* ---------- toast：所有改动必有明确反馈（差异清单 ②-26）。
    深底浅字小卡片，不用红绿撞色；错误态用文案表意，不靠颜色。 ---------- */
@@ -820,6 +842,29 @@ textarea.field{min-height:78px; resize:none; line-height:1.5}
   font-family:var(--mono); font-size:10px; letter-spacing:.06em; cursor:pointer;
 }
 .clockbar button:hover{color:var(--text); border-color:var(--line-2)}
+
+/* 时钟条说明气泡（首次进 Home）：观感同 .toast，但可交互、锚在时钟条上沿，带下指箭头 */
+.clocktip{
+  position:absolute; z-index:30; left:20px; right:20px;
+  bottom:calc(46px + env(safe-area-inset-bottom));
+  padding:12px 15px 10px; border-radius:12px;
+  background:var(--ink-3); color:var(--text);
+  border:1.5px solid var(--line-2);
+  font-size:13.5px; line-height:1.5;
+}
+.clocktip::after{
+  content:""; position:absolute; left:50%; bottom:-7px;
+  width:12px; height:12px; transform:translateX(-50%) rotate(45deg);
+  background:var(--ink-3);
+  border-right:1.5px solid var(--line-2); border-bottom:1.5px solid var(--line-2);
+}
+.clocktip p{margin:0}
+.clocktip b{font-weight:600}
+.clocktip button{
+  display:block; margin:8px 0 0 auto; padding:4px 2px;
+  background:none; border:0; cursor:pointer;
+  color:var(--amber); font-size:13px; font-weight:600;
+}
 
 /* ---------- 焦点 ---------- */
 :focus-visible{outline:3px solid var(--mint); outline-offset:2px; border-radius:6px}

@@ -32,7 +32,7 @@
         <p class="clock" data-step-caption></p>
         <p class="tag">先认识一下</p>
         <h1>一般几点<br>上下班</h1>
-        <p class="sub">我用它算你一天有多长、几点找你。</p>
+        <p class="sub">知道你几点收工，才好算今晚还剩多少时间、什么时候找你。</p>
         <div class="wheelset" role="group" aria-label="上下班时间">
           <div class="wheelcol">
             <p>上班</p>
@@ -71,13 +71,13 @@
       </div>
     </section>
 
-    <!-- 2 工作日身体状态（「今天有没有额外动一动」按计划本期删除） -->
+    <!-- 2 上半屏=工作日身体状态（长期底子，进 profile）；下半屏=今天额外情况（data-todayonly，仅当晚） -->
     <section class="screen" id="s-ob-2">
       <div class="body">
         <p class="clock" data-step-caption></p>
         <p class="tag">先认识一下</p>
-        <h1>这一天<br>身体经历了什么</h1>
-        <p class="sub">决定今晚该走走、该拉伸，还是该纯歇。</p>
+        <h1>上班的日子<br>身体大多什么样</h1>
+        <p class="sub">决定今晚该走走、该拉伸，还是该歇着。</p>
         <div class="opts" role="group" aria-label="工作日身体状态">
           <button class="opt" type="button" data-one="work_body_state" data-val="久坐" aria-pressed="true">基本坐着，一天下来发僵</button>
           <button class="opt" type="button" data-one="work_body_state" data-val="站着走动">站着走动，腿最累</button>
@@ -139,7 +139,7 @@
             <button class="chip" type="button" data-many="diet" data-val="海鲜过敏">海鲜过敏</button>
             <button class="chip" type="button" data-many="diet" data-val="乳糖不耐受">乳糖不耐</button>
             <button class="chip" type="button" data-many="diet" data-val="不吃辣">不吃辣</button>
-            <button class="chip" type="button" data-many="diet" data-val="素食">素食</button>
+            <button class="chip" type="button" data-many="diet" data-val="素食">素食主义</button>
             <button class="chip" type="button" data-many="diet" data-val="不吃牛羊肉">不吃牛羊肉</button>
           </div>
           <input class="field" id="dietInput" type="text" autocomplete="off"
@@ -176,21 +176,28 @@
       </div>
     </section>
 
-    <!-- 5 安全参数：起床滚轮（②-11）+ 运动基础（②-12）+ 性别/年龄数字/身高体重（②-13） -->
+    <!-- 5 安全参数：就寝/起床双滚轮（②-11，收集方式对齐 ob-1 上下班）+ 运动基础（②-12）+ 性别/年龄数字/身高体重（②-13） -->
     <section class="screen" id="s-ob-5">
       <div class="body">
         <p class="clock" data-step-caption></p>
         <p class="tag">可跳过</p>
         <h1>再多懂你一点<br>建议才更准</h1>
-        <p class="sub">跟前面填的一样，这些也是你的长期底子——配合每天的状态，把吃法和动法给得更准。</p>
+        <p class="sub">这些不常变，填了每晚的建议更契合你。</p>
         <div class="editgroup">
-          <p>平时几点起床（用来倒推今晚几点该停）</p>
-          <div class="wheelset" style="margin-top:0">
+          <p>平时几点睡、几点起</p>
+          <div class="wheelset" role="group" aria-label="睡觉起床时间" style="margin-top:0">
             <div class="wheelcol">
+              <p>就寝</p>
+              <div class="wheel"><div class="wheeltrack" id="wheelSleep" aria-label="就寝时间"></div></div>
+            </div>
+            <div class="wheelspan-sep" aria-hidden="true">→</div>
+            <div class="wheelcol">
+              <p>起床</p>
               <div class="wheel"><div class="wheeltrack" id="wheelWake" aria-label="起床时间"></div></div>
             </div>
           </div>
         </div>
+        <p class="worklen" id="sleepLen"></p>
         <div class="editgroup">
           <p>平时动得多吗</p>
           <div class="chips" role="group" aria-label="运动基础">
@@ -234,7 +241,7 @@
         <p class="clock" data-step-caption></p>
         <p class="tag">随时可改</p>
         <h1>你常吃<br>哪几类</h1>
-        <p class="sub">勾了我就知道往哪边轻推，不没收爱好。不勾也行，你说了我再接。</p>
+        <p class="sub">勾几个让我了解你的口味。<br>不想勾也行，爱吃的一样安排。</p>
         <div class="editgroup">
           <p>常吃形态，可多选</p>
           <div class="chips" role="group" aria-label="常吃形态">
@@ -300,9 +307,9 @@
       if (stepIdx > 0) show(STEPS[stepIdx - 1]);
     });
     function leaveEdit() {
-      // 资料页都是从设置进来的：回到 app.html 并用 #settings 锚点稳稳落回设置屏
+      // 资料页都是从设置 →「基本情况」进来的：回到 app.html 并用 #basicinfo 锚点稳稳落回那一屏
       //（不用 history.back——app.html 会重新加载并 refreshState 到 home，丢掉"我在设置"这个状态，问题2）。
-      location.href = 'app.html#settings';
+      location.href = 'app.html#basicinfo';
     }
 
     /* ---------- chips / opts 通用选择 ----------
@@ -371,9 +378,10 @@
       return out;
     }
     const WHEELS = {
-      on:   { id: 'wheelOn',   list: timeList(6, 14),  val: '09:00' },
-      off:  { id: 'wheelOff',  list: timeList(16, 26), val: '19:00' },
-      wake: { id: 'wheelWake', list: timeList(5, 10),  val: '07:00' },
+      on:    { id: 'wheelOn',    list: timeList(6, 14),  val: '09:00' },
+      off:   { id: 'wheelOff',   list: timeList(16, 26), val: '19:00' },
+      sleep: { id: 'wheelSleep', list: timeList(21, 27), val: '23:00' },
+      wake:  { id: 'wheelWake',  list: timeList(5, 10),  val: '07:00' },
     };
     function buildWheel(key) {
       const w = WHEELS[key];
@@ -390,7 +398,8 @@
           const idx = Math.max(0, Math.min(w.list.length - 1, Math.round(track.scrollTop / WHEEL_ROW)));
           w.val = w.list[idx];
           markWheel(key, idx);
-          if (key !== 'wake') renderWorkLen();
+          if (key === 'on' || key === 'off') renderWorkLen();
+          else renderSleepLen();
         }, 90);
       }, { passive: true });
     }
@@ -440,6 +449,19 @@
       document.getElementById('workLen').innerHTML =
         '这一天大约 <b>' + h + (m ? ' 小时 ' + m + ' 分' : ' 小时') + '</b>';
     }
+    /* 就寝→起床跨零点是常态（23:00 → 次日 07:00），按各自钟点直接算，不复用 wheelMinutes 的
+       on/off 同日基准。 */
+    function renderSleepLen() {
+      const [sh, sm] = WHEELS.sleep.val.split(':').map(Number);
+      const [wh, wm] = WHEELS.wake.val.split(':').map(Number);
+      const sleepMin = sh * 60 + sm;
+      let wakeMin = wh * 60 + wm;
+      if (wakeMin <= sleepMin) wakeMin += 24 * 60;
+      const mins = wakeMin - sleepMin;
+      const h = Math.floor(mins / 60), m = mins % 60;
+      document.getElementById('sleepLen').innerHTML =
+        '平时大约睡 <b>' + h + (m ? ' 小时 ' + m + ' 分' : ' 小时') + '</b>';
+    }
     Object.keys(WHEELS).forEach(buildWheel);
 
     /* ---------- 组装 payload：键名与 db.PROFILE_FIELDS 一一对齐 ---------- */
@@ -468,6 +490,7 @@
         // 老账号里存着的备注不动、继续注入提示词与安全检测，只是不再从界面收集新的。
         health_note: prefilledHealthNote,
         wake_time: WHEELS.wake.val,
+        sleep_time: WHEELS.sleep.val,
         exercise_base: oneVal('exercise_base') || '无/偶尔',
         gender: oneVal('gender'),
         age: num('ageInput'),
@@ -491,6 +514,7 @@
       setWheel('on', p.off_work_start);
       setWheel('off', p.off_work_end);
       setWheel('wake', p.wake_time);
+      setWheel('sleep', p.sleep_time);
       if (p.overtime_freq) setOne('overtime_freq', p.overtime_freq);
       // 通勤：库里的值没有对应档位（老账号 10/20/40/90…）就补一个 chip，不吸附到最近档位
       if (p.commute_min != null) setOneOrAdd('commute_min', p.commute_min, `${p.commute_min} 分钟`);
@@ -524,6 +548,7 @@
       document.getElementById('docAdvice').value = p.doctor_advice || '';
       ccChanged();
       renderWorkLen();
+      renderSleepLen();
       return true;
     }
 
@@ -610,8 +635,9 @@
         show(STEPS.includes(editSec) ? editSec : 'ob-1');
       });
     } else {
-      setWheel('on', '09:00'); setWheel('off', '19:00'); setWheel('wake', '07:00');
+      setWheel('on', '09:00'); setWheel('off', '19:00'); setWheel('sleep', '23:00'); setWheel('wake', '07:00');
       renderWorkLen();
+      renderSleepLen();
       show('ob-1');
     }
   </script>
